@@ -89,7 +89,7 @@ $('bkFile').addEventListener('change',e=>{
   rd.readAsText(f);
 });
 $('kTest').addEventListener('click',async()=>{
-  const u=$('kUrl').value.trim().replace(/\/+$/,''),m=$('kMsg');
+  const u=cleanUrl($('kUrl').value),m=$('kMsg');$('kUrl').value=u;
   if(!/^https?:\/\//.test(u)){m.textContent='Pega la dirección completa, empezando por https://';m.className='note down';return;}
   m.textContent='Conectando…';m.className='note';
   try{const j=await fget(u+'/');
@@ -122,7 +122,7 @@ $('saveSet').addEventListener('click',()=>{
   if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
   if(isFinite(kids)&&kids>=0&&kids<=5)s.maxKids=kids;
   s.repl=$('sRep').value==='1';s.shorts=$('mSh').value==='1';
-  {const k=kset(),u=$('kUrl').value.trim(),m=$('kMode').value;if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
+  {const k=kset(),u=cleanUrl($('kUrl').value),m=$('kMode').value;$('kUrl').value=u;if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   {const nn=nset();nn.token=$('tgToken').value.trim();nn.chat=$('tgChat').value.trim();nn.ops=$('nOps').value==='1';nn.daily=$('nDaily').value==='1';nn.bk=$('nBk').value==='1';s.device=$('devName').value.trim();}
   if($('sTf').value!==s.tf){s.tf=$('sTf').value;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
   const P=S.agents[0].params;

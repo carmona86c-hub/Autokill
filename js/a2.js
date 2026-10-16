@@ -56,8 +56,10 @@ function daily(){
    Las reglas filtran primero; solo los candidatos que las superan se consultan a Kronos.
    La consulta no bloquea el bucle: al llegar la respuesta se reevalúa. Si el servidor falla, se opera solo con reglas. */
 const kset=()=>S.settings.kronos||(S.settings.kronos={url:'',mode:'off'});
-const krOn=()=>{const k=kset();return k.mode!=='off'&&/^https?:\/\/\S+$/.test((k.url||'').trim());};
-const krUrl=p=>kset().url.trim().replace(/\/+$/,'')+p;
+const krOn=()=>{const k=kset();return k.mode!=='off'&&/^https?:\/\/\S+$/.test(cleanUrl(k.url));};
+/* limpia la dirección pegada: espacios, punto o barra final, y añade https:// si falta */
+const cleanUrl=u=>{u=String(u||'').trim().replace(/[\s.\/]+$/,'');if(u&&!/^https?:\/\//i.test(u))u='https://'+u;return u;};
+const krUrl=p=>cleanUrl(kset().url)+p;
 const KR={cache:{},tried:{},ping:0,busy:false,ok:false,at:0,ms:0,err:null,model:'',fake:false,asked:0};
 const krKey=(k,tf)=>k+'|'+tf;
 const lastT=(k,tf)=>{const c=kOf(tf,k);return c&&c.length?c[c.length-1].t:0;};

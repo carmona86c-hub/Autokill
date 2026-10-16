@@ -195,6 +195,16 @@ summary{list-style-position:inside}
       <p class="note" style="margin:8px 0 0">Cada activo solo se opera mientras su mercado real está abierto: acciones de EE. UU. de 9:30 a 16:00 de Nueva York con sus festivos, materias primas y divisas en horario de futuros, y criptomonedas siempre. Fuera de horario no entra, y las posiciones se cierran 5 minutos antes del cierre.</p>
     </div>
     <div class="card">
+      <h2>Cerebro IA · Kronos</h2>
+      <p class="note" style="margin:0 0 8px">Kronos es un modelo de IA de código abierto entrenado con velas de más de 45 mercados. Funciona en tu propio servidor gratuito de Hugging Face; pega aquí su dirección. Las reglas eligen candidatos y Kronos confirma o descarta cada entrada.</p>
+      <div class="field" style="gap:10px">
+        <div class="field"><label class="lbl" for="kUrl">Dirección del servidor</label><input id="kUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://usuario-automaton-kronos.hf.space"></div>
+        <div class="field"><label class="lbl" for="kMode">Uso</label><select id="kMode"><option value="off">Desactivado (solo reglas)</option><option value="filter">Confirmar entradas</option><option value="full">Confirmar entradas y anticipar salidas</option></select></div>
+        <button id="kTest" class="btn" type="button">Probar Kronos</button>
+        <p id="kMsg" class="note" style="margin:0"></p>
+      </div>
+    </div>
+    <div class="card">
       <h2>Replicación y evolución</h2>
       <div class="grid2">
         <div class="field"><label class="lbl" for="sRep">Replicación</label><select id="sRep"><option value="1">Activada</option><option value="0">Desactivada</option></select></div>
@@ -481,7 +491,7 @@ function newAgent(o){return Object.assign({id:0,name:'Automaton',gen:0,parentId:
 function fresh(capital,settings,exp){
   return {v:1,initial:capital,startedAt:Date.now(),lastSeen:Date.now(),running:true,nextId:1,
     agents:[newAgent({initial:capital,cash:capital,peak:capital})],log:[],exp:exp||{},
-    settings:settings||{fee:.001,slip:.0005,universe:20,tf:'5m',repl:true,maxKids:3,shorts:true,markets:{BN:true,BF:true,HL:true}}};
+    settings:settings||{fee:.001,slip:.0005,universe:20,tf:'5m',repl:true,maxKids:3,shorts:true,markets:{BN:true,BF:true,HL:true},kronos:{url:'',mode:'off'}}};
 }
 function valid(s){return s&&s.v===1&&Array.isArray(s.agents)&&s.agents.length&&s.settings;}
 function readLS(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(r);if(valid(s))return s;}}catch(e){}return null;}
@@ -506,6 +516,7 @@ async function loadState(){
 function migrate(s){
   if(!s.settings.markets)s.settings.markets={BN:true,BF:true,HL:true};
   if(s.settings.shorts===undefined)s.settings.shorts=true;
+  if(!s.settings.kronos)s.settings.kronos={url:'',mode:'off'};
   if(!s.exp)s.exp={};
   const fx=k=>k.includes(':')?k:'BN:'+k;
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
@@ -553,6 +564,47 @@ function daily(){
   if(n.bk)tgBackup();
 }
 
+/* ---------- cerebro Kronos: IA que prevé las próximas velas, en tu propio servidor ----------
+   Las reglas filtran primero; solo los candidatos que las superan se consultan a Kronos.
+   La consulta no bloquea el bucle: al llegar la respuesta se reevalúa. Si el servidor falla, se opera solo con reglas. */
+const kset=()=>S.settings.kronos||(S.settings.kronos={url:'',mode:'off'});
+const krOn=()=>{const k=kset();return k.mode!=='off'&&/^https?:\/\/\S+$/.test((k.url||'').trim());};
+const krUrl=p=>kset().url.trim().replace(/\/+$/,'')+p;
+const KR={cache:{},tried:{},busy:false,ok:false,at:0,ms:0,err:null,model:'',fake:false,asked:0};
+const krKey=(k,tf)=>k+'|'+tf;
+const lastT=(k,tf)=>{const c=kOf(tf,k);return c&&c.length?c[c.length-1].t:0;};
+function krEntry(k,tf){const c=KR.cache[krKey(k,tf)];return c&&c.t===lastT(k,tf)?c:null;}
+const krOf=(k,tf)=>{const c=krEntry(k,tf);return c?c.r:null;};
+const costOf=k=>2*feeOf(k)+2*S.settings.slip;
+async function krFetch(list){
+  if(KR.busy||!list.length)return;KR.busy=true;
+  list.forEach(({k,tf})=>KR.tried[krKey(k,tf)]=lastT(k,tf)); /* una consulta por activo y vela, aunque falle */
+  try{
+    const series=list.filter(({k,tf})=>(kOf(tf,k)||[]).length>=60).slice(0,8)
+      .map(({k,tf})=>({id:krKey(k,tf),tf_ms:TF_MS[tf],candles:kOf(tf,k).slice(-100).map(c=>[c.t,c.o,c.h,c.l,c.c,c.v])}));
+    if(!series.length)return;
+    const t0=performance.now(),c=new AbortController(),to=setTimeout(()=>c.abort(),60000);let j;
+    try{const r=await fetch(krUrl('/forecast'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pred_len:6,samples:4,series}),signal:c.signal});
+      j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));}
+    finally{clearTimeout(to);}
+    for(const id in j.results){const i=id.lastIndexOf('|'),k=id.slice(0,i),tf=id.slice(i+1);KR.cache[id]={t:lastT(k,tf),r:j.results[id],at:Date.now()};}
+    const ks=Object.keys(KR.cache);if(ks.length>400)ks.forEach(x=>{if(Date.now()-KR.cache[x].at>2*3600e3)delete KR.cache[x];});
+    Object.assign(KR,{ok:true,at:Date.now(),ms:Math.round(performance.now()-t0),err:null,model:j.model||'',fake:!!j.fake});KR.asked+=series.length;
+  }catch(e){KR.ok=false;KR.at=Date.now();KR.err=e&&e.name==='AbortError'?'no responde a tiempo':(e&&e.name==='TypeError')?'no se puede conectar':(e&&e.message)||'sin conexión';}
+  finally{KR.busy=false;}
+  /* reevaluar con las previsiones recibidas */
+  const again=()=>{if(busy)setTimeout(again,1000);else tick(true);};again();
+}
+/* salidas anticipadas: Kronos ve un giro claro en contra de una posición abierta */
+function krExit(a){
+  if(!krOn()||kset().mode!=='full')return;
+  for(const p of a.positions.slice()){
+    const e=krEntry(p.sym,p.tf||S.settings.tf);if(!e||e.at<p.openedAt)continue;
+    const sh=isShort(p),dir=sh?-e.r.ret:e.r.ret,agree=sh?1-e.r.up:e.r.up;
+    if(agree<=.25&&dir<-costOf(p.sym))closePos(a,p,`Kronos prevé giro en contra (${pct(dir)})`);
+  }
+}
+
 /* ---------- informe para revisar con Claude ---------- */
 function report(){
   const t=totals(),all=S.agents.flatMap(a=>a.closed.map(x=>Object.assign({ag:a.name},x)));
@@ -563,7 +615,8 @@ function report(){
   `Funcionando desde ${new Date(S.startedAt).toLocaleString('es-ES')} · capital ${money(S.initial)} · patrimonio ${money(t.tot)} · resultado ${sgn(t.pl)} (${pct(t.pl/S.initial)}) · reserva ${money(t.res)}`,
   `Ajustes: velas ${st.tf}+${HIGHER[st.tf]} · comisión ${(st.fee*100).toFixed(3)}% · deslizamiento ${(st.slip*100).toFixed(3)}% · cortos ${st.shorts?'sí':'no'} · mercados ${['BN','BF','HL'].filter(x=>st.markets[x]).map(x=>SRCNAME[x]).join(', ')}`,
   `AGENTES`,...S.agents.map(a=>{const s=stats(a),P=a.params;return `  ${a.name} gen${a.gen} ${a.status}/${a.tier} · ${pct(s.ret)} · ${s.n} ops ${s.n?Math.round(s.hit*100)+'%':''} · PF ${s.n?(isFinite(s.pf)?s.pf.toFixed(2):'∞'):'—'} · caída máx ${(s.dd*100).toFixed(1)}% · EMA ${P.emaF}/${P.emaS} riesgo ${(P.riskPct*100).toFixed(2)}% stop ${(+P.stopATR).toFixed(2)} obj ${(+P.tpATR).toFixed(2)} trail ${(+P.trailATR).toFixed(2)} RSI ${Math.round(P.rsiMin)}-${Math.round(P.rsiMax)} min ${P.minScore}`;}),
-  `POR TIPO DE MERCADO`,grp(x=>catOf(x.sym)),`AL ALZA / A LA BAJA`,grp(x=>x.side==='short'?'corto':'largo'),`POR VELAS`,grp(x=>x.tf||'?'),`POR MOTIVO DE SALIDA`,grp(x=>x.reason),
+  `POR TIPO DE MERCADO`,grp(x=>catOf(x.sym)),`AL ALZA / A LA BAJA`,grp(x=>x.side==='short'?'corto':'largo'),`POR VELAS`,grp(x=>x.tf||'?'),`CON / SIN KRONOS`,grp(x=>x.kr?'con Kronos':'sin Kronos'),`POR MOTIVO DE SALIDA`,grp(x=>x.reason),
+  `KRONOS: ${krOn()?(KR.ok?'conectado ('+(KR.model||'')+', '+KR.ms+' ms, '+KR.asked+' previsiones)':'sin respuesta: '+(KR.err||'—')):'desactivado'}`,
   `ÚLTIMA EVALUACIÓN: ${ui.summary||'—'}${ui.reasons?' · descartes: '+ui.reasons:''}`,
   `MEJORES ACTIVOS: ${ex.slice(0,5).map(fmtE).join(' · ')||'—'}`,`PEORES ACTIVOS: ${ex.slice(-5).reverse().filter(([,e])=>e.pnl<0).map(fmtE).join(' · ')||'—'}`,
   `ÚLTIMAS OPERACIONES`,...all.sort((a,b)=>b.t1-a.t1).slice(0,30).map(x=>`  ${new Date(x.t1).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} ${base(x.sym)} ${x.side==='short'?'corto':'largo'} ${x.tf||''} ${px(x.entry)}→${px(x.exit)} ${pct(x.pct,2)} ${sgn(x.pnl)} ${x.reason} ${Math.round((x.t1-x.t0)/60000)}min`)
@@ -628,16 +681,16 @@ function openPos(a,an,P){
   qty=Math.min(qty,(e*P.maxPosPct)/entry,a.cash/(entry*(1+fee)));
   if(qty*entry<MIN_NOTIONAL)return 'capital insuficiente para el tamaño mínimo ($5)';
   const cost=qty*entry,f=cost*fee;a.cash-=cost+f;
-  const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr,risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f};
+  const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr,risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
   a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym]);
-  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)}) ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}`);
+  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)}) ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
   return null;
 }
 function closePos(a,p,reason,at){
   const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,pnl=net-p.basis;
   a.cash+=net;a.positions=a.positions.filter(x=>x!==p);
   const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/p.basis;
-  a.closed.unshift({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now()});
+  a.closed.unshift({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0});
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0)a.cooldown[p.sym]=Date.now()+30*60e3;
   L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/p.basis)}) · motivo: ${reason}`);
@@ -668,7 +721,7 @@ function checkExits(a){
 }
 /* experiencia: el historial propio con cada activo ajusta la puntuación y puede vetarlo */
 function xp(sym){const e=S.exp[sym];if(!e||e.n<3)return {adj:0,veto:false,e};const wr=(e.w+1)/(e.n+2);return {adj:Math.round((wr-.5)*30),veto:e.n>=6&&e.pnl<0&&wr<.35,e};}
-function decide(a,an,P,T){
+function decide(a,an,P,T,pre){
   const sh=an.side==='short';
   if(sh&&!S.settings.shorts)return 'cortos desactivados';
   if(!an.trend)return sh?'sin tendencia bajista':'sin tendencia alcista';
@@ -686,15 +739,26 @@ function decide(a,an,P,T){
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
   if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=2)return 'ya tiene dos criptomonedas en la misma dirección';
   if(a.positions.some(p=>p.sym===an.sym))return 'ya en cartera';
+  if(!pre&&krOn()){
+    const f=krOf(an.sym,an.tf);
+    if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}
+    else{
+      const sh=an.side==='short',dir=sh?-f.ret:f.ret,agree=sh?1-f.up:f.up;
+      if(agree<.55)return `Kronos no confirma la dirección (${Math.round(agree*100)}% de escenarios a favor)`;
+      if(dir<costOf(an.sym))return `Kronos prevé poco recorrido (${pct(dir)})`;
+      an.kr={ret:dir,up:agree};
+    }
+  }
   return null;
 }
 const RLAB=[['sin tendencia','sin tendencia clara'],['sobrecomprado','RSI sobrecomprado'],['sobrevendido','RSI sobrevendido'],['sin fuerza','RSI sin fuerza'],['presión vendedora','sin presión vendedora'],['desactivados','cortos desactivados'],['experiencia','vetado por experiencia'],['puntuación','puntuación insuficiente'],
-  ['demasiado baja','se mueve demasiado poco para cubrir comisiones'],['excesiva','volatilidad excesiva'],['no cubre','objetivo no cubre costes'],['escapó','precio ya escapado'],['espera','en espera tras pérdida'],['máximo','límite de posiciones'],['misma dirección','demasiadas criptos en la misma dirección'],['cartera','ya en cartera'],['capital','capital insuficiente']];
+  ['demasiado baja','se mueve demasiado poco para cubrir comisiones'],['excesiva','volatilidad excesiva'],['no cubre','objetivo no cubre costes'],['escapó','precio ya escapado'],['espera','en espera tras pérdida'],['máximo','límite de posiciones'],['misma dirección','demasiadas criptos en la misma dirección'],['cartera','ya en cartera'],['capital','capital insuficiente'],['previsión de Kronos','esperando a Kronos'],['Kronos no confirma','Kronos no confirma la dirección'],['poco recorrido','Kronos prevé poco recorrido']];
 const rlab=w=>{const r=RLAB.find(([x])=>w.includes(x));return r?r[1]:w;};
 function dayLoss(a){return a.dayStart?(total(a)-a.dayStart)/a.initial:0;}
 function agentScan(a,manual){
   if(a.status!=='alive')return;
   const P=a.params,T=TIER[a.tier];
+  krExit(a);
   const lim=S.settings.maxDay||.03,halted=dayLoss(a)<=-lim;
   if(halted&&a.dayHalt!==a.dayKey){a.dayHalt=a.dayKey;L(a,'tier',`Límite de pérdida diaria alcanzado (${pct(dayLoss(a))} hoy). No abre nuevas operaciones hasta mañana; las abiertas siguen con sus stops.`);}
   if(!manual){
@@ -712,7 +776,7 @@ function agentScan(a,manual){
   let opened=0,logged=0;const tally={};
   for(const r of rows){
     let pick=null,why=null,best=null;
-    for(const an of r){const w=decide(a,an,P,T);if(!w){pick=an;break;}if(!best||an.score>best.an.score)best={an,w};}
+    for(const an of r){const w=decide(a,an,P,T);if(an.krPending)(ui.krQ=ui.krQ||[]).push({k:an.sym,tf:an.tf,s:an.score});if(!w){pick=an;break;}if(!best||an.score>best.an.score)best={an,w};}
     if(pick){const err=openPos(a,pick,P);if(!err){opened++;continue;}why=err;best={an:pick,w:err};}
     else why=best.w;
     const lab=rlab(why);tally[lab]=(tally[lab]||0)+1;
@@ -784,8 +848,15 @@ async function tick(manual){
       if(due||manual){
         const need=tf=>!market.k[tf]||!Object.keys(market.k[tf]).length||Math.floor(Date.now()/TF_MS[tf])!==(market.kAt||{})[tf];
         if(due||need(S.settings.tf))await Promise.all(tfs().filter(tf=>tf===S.settings.tf?true:need(tf)).map(tf=>fetchKlines(tf).catch(()=>{})));
+        ui.krQ=[];
         if(due){alive().forEach(a=>agentScan(a,false));alive().forEach(a=>{maybeSpawn(a);maybeEvolve(a);});const m=TF_MS[S.settings.tf];nextScan=Math.ceil(Date.now()/m)*m+4000;}
         else alive().forEach(a=>agentScan(a,true));
+        if(krOn()&&!KR.busy){
+          const q=new Map();(ui.krQ||[]).sort((x,y)=>y.s-x.s).forEach(x=>{const id=krKey(x.k,x.tf);if(!q.has(id)&&!krEntry(x.k,x.tf)&&KR.tried[id]!==lastT(x.k,x.tf))q.set(id,x);});
+          if(kset().mode==='full')S.agents.forEach(a=>a.positions.forEach(p=>{const tf=p.tf||S.settings.tf,id=krKey(p.sym,tf);if(!q.has(id)&&!krEntry(p.sym,tf)&&isOpen(p.sym)&&KR.tried[id]!==lastT(p.sym,tf))q.set(id,{k:p.sym,tf});}));
+          /* si el servidor falló, se reintenta como mucho cada 5 minutos */
+          if(q.size&&(KR.ok||!KR.err||Date.now()-KR.at>300000))krFetch([...q.values()]);
+        }
       }
     }
     S.agents.forEach(a=>{if(a.status==='alive'){sweep(a);updateTier(a);}track(a);});
@@ -841,7 +912,7 @@ function renderPanel(){
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
   renderMarkets();renderQuotes();
   const mp=S.agents[0].params.minScore;
-  $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
+  $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
   $('scanInfo').textContent=ui.scanAt?`${ui.summary}.${ui.reasons?' Por qué no compra el resto: '+ui.reasons+'.':''} Última evaluación ${clock(ui.scanAt)}.`:(market.err?`Sin conexión con el mercado (${market.err}). Reintentando.`:'Conectando con el mercado real…');
 }
 function renderQuotes(){
@@ -870,6 +941,7 @@ async function diagnose(){
     if(!ks.length)throw new Error('no devuelve acciones (se usa el método alternativo)');return ks.length+' precios · '+ks.slice(0,4).map(k=>k.split(':')[1]+' '+px(+m[k])).join(', ');});
   await step('Hyperliquid · velas de una acción',async()=>{const id=(market.lists.HL[0]||'HL:xyz:TSLA').slice(3);const r=await hl({type:'candleSnapshot',req:{coin:id,interval:'5m',startTime:Date.now()-864e5,endTime:Date.now()}});
     if(!r.length)throw new Error('sin velas');return id.split(':')[1]+': '+r.length+' velas en 24 h, última '+px(+r[r.length-1].c);});
+  if(kset().url)await step('Cerebro Kronos',async()=>{const j=await fget(krUrl('/'));if(!j.ready)throw new Error(j.error?'error al cargar el modelo: '+j.error:'el modelo aún se está cargando, espera unos minutos');return (j.model||'')+(j.fake?' (SIMULADO)':'')+' · listo · '+(j.calls||0)+' consultas';});
   await step('Horario de la bolsa de EE. UU.',async()=>{const o=sessOpen('us',Date.now());const no=o?null:nextOpen('us');return o?'abierta ahora':'cerrada · abre '+new Date(no).toLocaleString('es-ES',{weekday:'long',hour:'2-digit',minute:'2-digit'})+' (tu hora)';});
   $('diagBtn').disabled=false;$('diagBtn').textContent='Comprobar conexión';
 }
@@ -883,7 +955,7 @@ function renderMarkets(){
   const now=Date.now(),hm=t=>new Date(t).toLocaleString('es-ES',{weekday:'short',hour:'2-digit',minute:'2-digit'});
   const ses=Object.keys(SESS).filter(c=>by[c]).map(c=>{const o=sessOpen(c,now),mc=o?minsToClose(c):0,no=o?null:nextOpen(c);
     return `<div class="srcl"><span class="dot ${o?'on':''}"></span><span>${SESS[c].name} <span class="note">· ${by[c].length}</span></span><span class="note">${o?(isFinite(mc)?'abierta · cierra en '+(mc>=60?Math.floor(mc/60)+' h '+(mc%60)+' min':mc+' min'):'abierta'):(no?'cerrada · abre '+hm(no):'cerrada')}</span></div>`;}).join('');
-  $('mkts').innerHTML=(chips?`<div class="mks">${chips}</div>`:'<div class="empty">Cargando mercados…</div>')+(ses?`<div class="lbl" style="margin:4px 0 2px">Horario</div>${ses}`:'')+`<div class="lbl" style="margin:10px 0 2px">Fuentes de precios</div>`+src;
+  $('mkts').innerHTML=(chips?`<div class="mks">${chips}</div>`:'<div class="empty">Cargando mercados…</div>')+(ses?`<div class="lbl" style="margin:4px 0 2px">Horario</div>${ses}`:'')+`<div class="lbl" style="margin:10px 0 2px">Fuentes de precios</div>`+src+(krOn()?`<div class="lbl" style="margin:10px 0 2px">Cerebro IA</div><div class="srcl"><span class="dot ${KR.ok&&Date.now()-KR.at<20*60e3?'on':''}"></span><span>Kronos</span><span class="note">${KR.busy?'pensando…':KR.ok?esc((KR.model||'').split('/').pop())+' · '+(KR.ms/1000).toFixed(1).replace('.',',')+' s'+(KR.fake?' · simulado':''):KR.err?'sin respuesta ('+esc(KR.err)+'): opera solo con reglas':'esperando la primera consulta'}</span></div>`:'');
 }
 const TAGS={open:'compra',close:'venta',reject:'rechazo',reserve:'reserva',spawn:'nace',evolve:'evolución',tier:'nivel',dead:'apagado',pause:'pausa',info:'info'};
 function renderLog(){
@@ -937,7 +1009,7 @@ function renderLin(){
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -1023,6 +1095,15 @@ $('bkFile').addEventListener('change',e=>{
   rd.onload=()=>{try{const o=JSON.parse(rd.result);if(!valid(o))throw 0;S=migrate(o);save(true);$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;$('bkMsg').textContent='Copia restaurada desde el archivo.';buildSettings();tick(true);}catch(err){$('bkMsg').textContent='Ese archivo no es una copia válida de Automaton.';}e.target.value='';};
   rd.readAsText(f);
 });
+$('kTest').addEventListener('click',async()=>{
+  const u=$('kUrl').value.trim().replace(/\/+$/,''),m=$('kMsg');
+  if(!/^https?:\/\//.test(u)){m.textContent='Pega la dirección completa, empezando por https://';m.className='note down';return;}
+  m.textContent='Conectando…';m.className='note';
+  try{const j=await fget(u+'/');
+    if(j.ready){m.textContent='Conectado: '+(j.model||'Kronos')+(j.fake?' (modo simulado)':'')+'. Elige un uso y pulsa Guardar ajustes.';m.className='note up';}
+    else{m.textContent=j.error?'El servidor responde pero el modelo falló al cargar: '+j.error:'El servidor responde; el modelo aún se está cargando. Prueba en unos minutos.';m.className='note '+(j.error?'down':'');}}
+  catch(e){m.textContent='No se puede conectar ('+why(e)+'). Comprueba la dirección y que el servidor esté en marcha ("Running" en Hugging Face).';m.className='note down';}
+});
 $('diagBtn').addEventListener('click',()=>{diagnose().catch(()=>{$('diagBtn').disabled=false;$('diagBtn').textContent='Comprobar conexión';});});
 $('quotesBox').addEventListener('toggle',renderQuotes);
 $('netRetry').addEventListener('click',()=>{market.uniAt=0;market.universe=[];market.err=null;$('netRetry').textContent='Conectando…';tick(true).finally(()=>{$('netRetry').textContent='Reintentar';});});
@@ -1036,6 +1117,7 @@ $('saveSet').addEventListener('click',()=>{
   if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
   if(isFinite(kids)&&kids>=0&&kids<=5)s.maxKids=kids;
   s.repl=$('sRep').value==='1';s.shorts=$('mSh').value==='1';
+  {const k=kset(),u=$('kUrl').value.trim(),m=$('kMode').value;if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   {const nn=nset();nn.token=$('tgToken').value.trim();nn.chat=$('tgChat').value.trim();nn.ops=$('nOps').value==='1';nn.daily=$('nDaily').value==='1';nn.bk=$('nBk').value==='1';s.device=$('devName').value.trim();}
   if($('sTf').value!==s.tf){s.tf=$('sTf').value;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
   const P=S.agents[0].params;
@@ -1057,7 +1139,7 @@ $('impBtn').addEventListener('click',()=>{
 (async()=>{
   S=await loadState();$('capIn').value=S.initial;
   keepAwake();render();tick(true);
-  window.__automaton={get S(){return S;},market,tick,eq,total,stats,alive,sessOpen,nextOpen,minsToClose,sessOf};
+  window.__automaton={get S(){return S;},market,KR,tick,eq,total,stats,alive,sessOpen,nextOpen,minsToClose,sessOf};
 })();
 })();
 </script>

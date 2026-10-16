@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0f14">
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json" id="mf">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -164,6 +164,9 @@ summary{list-style-position:inside}
     <div id="kpis" class="kpis"></div>
     <div class="card"><h2>Evolución del patrimonio</h2><canvas id="chart" aria-label="Gráfico de patrimonio"></canvas></div>
     <div class="card"><h2>Últimas operaciones</h2><div class="tw" id="trades"></div></div>
+    <div class="card"><h2>Informe para revisar</h2><p class="note" style="margin:0 0 8px">Resume resultados por agente, por tipo de mercado, al alza y a la baja, motivos de descarte y últimas operaciones. Cópialo y pégamelo en el chat para ajustar el agente con datos reales.</p>
+      <button id="repBtn" class="btn pri" type="button">Copiar informe</button><p id="repMsg" class="note" style="margin:8px 0 0"></p>
+      <textarea id="repTxt" rows="6" readonly aria-label="Informe" hidden style="width:100%;margin-top:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:11px var(--mono);padding:8px"></textarea></div>
     <div class="card"><h2>Experiencia acumulada</h2><p class="note" style="margin:0 0 8px">Lo aprendido por activo. Ajusta la puntuación de futuras entradas y veta los activos que le han ido mal. Se conserva aunque reinicies el capital.</p><div class="tw" id="expT"></div></div>
   </section>
 
@@ -173,12 +176,13 @@ summary{list-style-position:inside}
     <div class="card">
       <h2>Mercado y costes</h2>
       <div class="grid2">
-        <div class="field"><label class="lbl" for="sFee">Comisión (%)</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%)</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
         <div class="field"><label class="lbl" for="sSlip">Deslizamiento (%)</label><input id="sSlip" type="number" step="0.01" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sDay">Pérdida diaria máxima (%)</label><input id="sDay" type="number" step="0.5" min="0.5" max="20" inputmode="decimal"></div>
         <div class="field"><label class="lbl" for="sUni">Criptomonedas vigiladas</label><input id="sUni" type="number" min="5" max="60" inputmode="numeric"></div>
         <div class="field"><label class="lbl" for="sTf">Velas de decisión</label><select id="sTf"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Precios reales en solo lectura. Las criptomonedas son las de más volumen en Binance.</p>
+      <p class="note" style="margin:8px 0 0">Precios reales en solo lectura. Las criptomonedas son las de más volumen en Binance. Binance Futuros cobra la mitad de comisión y Hyperliquid un 90 %. Si un agente pierde en el día más del máximo, no abre nada más hasta el día siguiente.</p>
     </div>
     <div class="card">
       <h2>Mercados</h2>
@@ -204,9 +208,29 @@ summary{list-style-position:inside}
     </div>
     <button id="saveSet" class="btn pri" type="button">Guardar ajustes</button>
     <div class="card">
-      <h2>Copia de seguridad</h2>
-      <p class="note" style="margin:0 0 8px">Todo se guarda solo en este dispositivo (dos almacenes del navegador). Para no depender de él, descarga una copia o pega una anterior.</p>
-      <div class="row"><button id="expBtn" class="btn" type="button">Mostrar copia</button><button id="impBtn" class="btn" type="button">Restaurar copia</button></div>
+      <h2>Avisos</h2>
+      <p class="note" style="margin:0 0 8px">Por Telegram te llegan al móvil aunque la app esté en el ordenador. Crea un bot hablando con <b>@BotFather</b> en Telegram (escribe /newbot), pega aquí el token que te da, escríbele cualquier cosa a tu bot y pulsa "Buscar mi chat".</p>
+      <div class="field" style="gap:10px">
+        <div class="field"><label class="lbl" for="tgToken">Token del bot de Telegram</label><input id="tgToken" type="text" autocomplete="off" spellcheck="false" placeholder="123456789:AA…"></div>
+        <div class="field"><label class="lbl" for="tgChat">Número de chat</label><input id="tgChat" type="text" inputmode="numeric" autocomplete="off" placeholder="se rellena con Buscar mi chat"></div>
+        <div class="row"><button id="tgFind" class="btn" type="button" style="flex:1">Buscar mi chat</button><button id="tgTest" class="btn" type="button" style="flex:1">Enviar prueba</button></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl" for="nOps">Compras y ventas</label><select id="nOps"><option value="1">Avisar</option><option value="0">No avisar</option></select></div>
+          <div class="field"><label class="lbl" for="nDaily">Resumen diario 22:00</label><select id="nDaily"><option value="1">Enviar</option><option value="0">No enviar</option></select></div>
+          <div class="field"><label class="lbl" for="nBk">Copia diaria a Telegram</label><select id="nBk"><option value="1">Enviar</option><option value="0">No enviar</option></select></div>
+          <div class="field"><label class="lbl" for="nSys">Avisos del navegador</label><button id="sysBtn" class="btn" type="button">Activar</button></div>
+        </div>
+        <p id="tgMsg" class="note" style="margin:0"></p>
+      </div>
+      <p class="note" style="margin:8px 0 0">Siempre avisa si un agente se apaga, baja de nivel o nace uno nuevo. El token se guarda solo en este dispositivo.</p>
+    </div>
+    <div class="card">
+      <h2>Dispositivo principal y copias</h2>
+      <p class="note" style="margin:0 0 8px">Cada dispositivo guarda su propio agente. Para no tener dos agentes distintos, deja operando solo uno (el ordenador, que puede estar siempre encendido) y pausa los demás con "Pausar agente". Para pasar todo a otro dispositivo: envía la copia a Telegram, ábrela allí y restáurala.</p>
+      <div class="field"><label class="lbl" for="devName">Nombre de este dispositivo</label><input id="devName" type="text" placeholder="por ejemplo: Ordenador de casa"></div>
+      <div class="row" style="margin-top:10px"><button id="bkCopy" class="btn" type="button" style="flex:1">Copiar copia</button><button id="bkTg" class="btn" type="button" style="flex:1">Enviar copia a Telegram</button></div>
+      <div class="row" style="margin-top:8px"><button id="expBtn" class="btn" type="button" style="flex:1">Mostrar copia</button><button id="impBtn" class="btn" type="button" style="flex:1">Pegar copia</button></div>
+      <div class="field" style="margin-top:8px"><label class="lbl" for="bkFile">Restaurar desde archivo</label><input id="bkFile" type="file" accept=".json,application/json,text/plain"></div>
       <textarea id="bk" rows="4" aria-label="Copia de seguridad" style="display:none;width:100%;margin-top:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:11px var(--mono);padding:8px"></textarea>
       <p id="bkMsg" class="note" style="margin:8px 0 0"></p>
     </div>
@@ -256,11 +280,16 @@ const CAT_IDX=new Set(['XYZ100','US500','SPX','SP500','USA500','NDX','NAS100','N
 const CAT_COM=new Set(['GOLD','SILVER','XAU','XAG','CL','OIL','WTI','BRENT','USOIL','UKOIL','NATGAS','NG','GAS','COPPER','HG','PLATINUM','PLAT','XPT','PALLADIUM','XPD','URANIUM','URNM','CORN','WHEAT','SOY','SOYBEAN','COFFEE','COCOA','SUGAR','COTTON','LUMBER','ALUMINIUM','ALUMINUM','NICKEL','ZINC']);
 const CAT_FX=new Set(['EUR','JPY','GBP','CHF','AUD','CAD','NZD','MXN','CNH','CNY','TRY','BRL','INR','KRW','SEK','NOK','ZAR','EURUSD','USDJPY','GBPUSD','USDCHF','AUDUSD','USDCAD','DXY','USDX']);
 let S=null;
-const market={price:{},k:{},meta:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
+const market={price:{},pt:{},k:{},meta:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
 const ui={radar:[],summary:'',reasons:'',scanAt:0};
 const srcOf=k=>k.slice(0,2),idOf=k=>k.slice(3);
-const base=k=>(market.meta[k]&&market.meta[k].name)||k.split(':').pop().replace(/USDT$/,'');
-const catOf=k=>(market.meta[k]&&market.meta[k].cat)||(srcOf(k)==='BN'?'Cripto':'Otros');
+/* datos de cada activo: los del mercado y, para posiciones abiertas, una copia guardada (sobrevive a recargas) */
+const metaOf=k=>market.meta[k]||(S&&S.meta&&S.meta[k])||null;
+const base=k=>(metaOf(k)&&metaOf(k).name)||k.split(':').pop().replace(/USDT$/,'');
+const catOf=k=>(metaOf(k)&&metaOf(k).cat)||(srcOf(k)==='BN'?'Cripto':'Otros');
+/* cada precio guarda cuándo llegó: nunca se decide ni se ejecuta con precios viejos */
+function setPx(k,v){if(v>0&&isFinite(v)){market.price[k]=v;market.pt[k]=Date.now();}}
+const pxFresh=(k,ms)=>market.price[k]>0&&Date.now()-(market.pt[k]||0)<ms;
 let instantFails=0,okFetches=0;
 async function fget(url,opt){
   const c=new AbortController(),to=setTimeout(()=>c.abort(),9000),t0=performance.now();
@@ -290,7 +319,7 @@ async function uniBN(){
   const t=await jget('/api/v3/ticker/24hr');
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
-  market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume};market.price[k]=+x.lastPrice;return k;});
+  market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume};setPx(k,+x.lastPrice);return k;});
   ok('BN');
 }
 async function uniBF(){
@@ -304,7 +333,7 @@ async function uniBF(){
     const name=x.baseAsset||x.symbol.replace(/USDT$/,'');
     let cat=ut==='COMMODITY'||ut==='METAL'||CAT_COM.has(name)?'Materias primas':/EQUITY|STOCK/.test(ut)?'Acciones':(ut==='FOREX'||ut==='FX'||CAT_FX.has(name))?'Divisas':CAT_IDX.has(name)?'Índices':'TradFi';
     const sess={HK_EQUITY:'hk',KR_EQUITY:'krx',CN_EQUITY:'shanghai'}[ut];
-    const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess};market.price[k]=vol[x.symbol][1];out.push(k);
+    const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess};setPx(k,vol[x.symbol][1]);out.push(k);
   });
   market.lists.BF=out;ok('BF');
 }
@@ -325,7 +354,7 @@ async function uniHL(){
     market.hlAt[dex]=Date.now();
   });
   const cap=S.settings.tf==='1m'?10:30;
-  market.lists.HL=Object.values(best).sort((a,b)=>b.v-a.v).slice(0,cap).map(x=>{const k='HL:'+x.id;market.meta[k]={name:x.name,cat:x.cat,vol:x.v};market.price[k]=x.p;return k;});
+  market.lists.HL=Object.values(best).sort((a,b)=>b.v-a.v).slice(0,cap).map(x=>{const k='HL:'+x.id;market.meta[k]={name:x.name,cat:x.cat,vol:x.v};setPx(k,x.p);return k;});
   ok('HL');
 }
 async function loadUniverse(){
@@ -365,7 +394,7 @@ const IDX_SESS={JP225:'tokyo',NIKKEI:'tokyo',DAX:'xetra',GER40:'xetra',DE40:'xet
 const GRAINS=new Set(['CORN','WHEAT','SOY','SOYBEAN']);
 function sessOf(k){
   if(srcOf(k)==='BN')return '24x7';
-  if(market.meta[k]&&market.meta[k].sess)return market.meta[k].sess;
+  {const m=metaOf(k);if(m&&m.sess)return m.sess;}
   const c=catOf(k),n=base(k);
   if(c==='Cripto')return '24x7';
   if(c==='Índices')return IDX_SESS[n]||'us';
@@ -390,7 +419,8 @@ function sessOpen(cls,t){
 const isOpen=(k,t=Date.now())=>sessOpen(sessOf(k),t);
 /* minutos hasta el cierre (máx. 240) y momento de la próxima apertura (máx. 5 días) */
 function minsToClose(cls,t=Date.now()){if(!SESS[cls].f)return Infinity;for(let i=0;i<=240;i+=5)if(!sessOpen(cls,t+i*60000))return i;return Infinity;}
-function nextOpen(cls,t=Date.now()){for(let i=5;i<=7200;i+=5)if(sessOpen(cls,t+i*60000))return t+i*60000;return null;}
+const noCache={};
+function nextOpen(cls,t=Date.now()){const c=noCache[cls];if(c&&c>t)return c;for(let i=5;i<=7200;i+=5)if(sessOpen(cls,t+i*60000))return noCache[cls]=t+i*60000;return null;}
 const uni=()=>market.universe;
 async function pollPrices(){
   const need=new Set();S.agents.forEach(a=>a.positions.forEach(p=>need.add(p.sym)));
@@ -399,16 +429,16 @@ async function pollPrices(){
   const jobs=[];
   if(by.BN.length)jobs.push(jget('/api/v3/ticker/price?symbols='+encodeURIComponent(JSON.stringify(by.BN.map(idOf))))
     .catch(()=>jget('/api/v3/ticker/price'))
-    .then(j=>{j.forEach(x=>market.price['BN:'+x.symbol]=+x.price);market.src.BN.at=Date.now();market.src.BN.ok=true;}).catch(e=>fail('BN',e)));
+    .then(j=>{j.forEach(x=>setPx('BN:'+x.symbol,+x.price));market.src.BN.at=Date.now();market.src.BN.ok=true;}).catch(e=>fail('BN',e)));
   if(by.BF.length)jobs.push(fget(FAPI+'/fapi/v1/ticker/price')
-    .then(j=>{const w=new Set(by.BF);j.forEach(x=>{const k='BF:'+x.symbol;if(w.has(k))market.price[k]=+x.price;});market.src.BF.at=Date.now();market.src.BF.ok=true;}).catch(e=>fail('BF',e)));
+    .then(j=>{const w=new Set(by.BF);j.forEach(x=>{const k='BF:'+x.symbol;if(w.has(k))setPx(k,+x.price);});market.src.BF.at=Date.now();market.src.BF.ok=true;}).catch(e=>fail('BF',e)));
   if(by.HL.length){
     const dexes=new Set(by.HL.map(k=>idOf(k).split(':')[0])),hot=new Set([...need].filter(k=>srcOf(k)==='HL').map(k=>idOf(k).split(':')[0]));
     dexes.forEach(dex=>{
       if(!hot.has(dex)&&Date.now()-(market.hlAt[dex]||0)<60000)return; /* sin posiciones: basta un precio por minuto */
       jobs.push(hl({type:'allMids',dex}).then(async m=>{
-        let hit=0;for(const c in m){if(!c.startsWith(dex+':'))continue;const k='HL:'+c;if(all.has(k)){market.price[k]=+m[c];hit++;}}
-        if(!hit){const [meta,ctxs]=await hl({type:'metaAndAssetCtxs',dex});meta.universe.forEach((u,i)=>{const id=u.name.includes(':')?u.name:dex+':'+u.name,k='HL:'+id,c=ctxs[i]||{};if(all.has(k))market.price[k]=+(c.midPx||c.markPx)||market.price[k];});}
+        let hit=0;for(const c in m){if(!c.startsWith(dex+':'))continue;const k='HL:'+c;if(all.has(k)){setPx(k,+m[c]);hit++;}}
+        if(!hit){const [meta,ctxs]=await hl({type:'metaAndAssetCtxs',dex});meta.universe.forEach((u,i)=>{const id=u.name.includes(':')?u.name:dex+':'+u.name,k='HL:'+id,c=ctxs[i]||{};if(all.has(k))setPx(k,+(c.midPx||c.markPx));});}
         market.hlAt[dex]=Date.now();market.src.HL.at=Date.now();market.src.HL.ok=true;}).catch(e=>fail('HL',e)));
     });
   }
@@ -418,7 +448,7 @@ async function pollPrices(){
 async function fetchKlines(tf){
   const now=Date.now(),ms=TF_MS[tf];market.k[tf]=market.k[tf]||{};market.kAt=market.kAt||{};market.kAt[tf]=Math.floor(now/ms);
   const held=new Set();S.agents.forEach(a=>a.positions.forEach(p=>held.add(p.sym)));
-  const keys=uni().filter(k=>isOpen(k)||held.has(k));
+  const keys=[...new Set([...uni(),...held])].filter(k=>isOpen(k)||held.has(k));
   if(!market.raw)market.raw={};
   const toK=k=>k.map(r=>({t:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5],ct:r[6]}));
   const store=(k,arr)=>{
@@ -428,14 +458,14 @@ async function fetchKlines(tf){
     const cls=sessOf(k);market.k[tf][k]=all.filter(c=>c.ct<now&&sessOpen(cls,c.t)).slice(-150);
   };
   /* sin historial previo: se piden varios días para reunir velas de sesión real; después, solo las nuevas */
-  const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:3)*864e5?r.c[r.c.length-1].t:null;};
+  const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
     pool(bin,10,async k=>{const id=idOf(k);let r;
       if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=120`);
       else{const st=since(k);r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(st?`startTime=${st}&limit=1500`:'limit=1500'));}
       store(k,toK(r));}),
-    pool(hls,4,async k=>{const st=since(k)||now-(tf==='1m'?2:tf==='1h'?20:4)*864e5;
+    pool(hls,4,async k=>{const st=since(k)||now-({'1m':2,'5m':4,'15m':8,'1h':20}[tf]||4)*864e5;
       const r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});
       store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); })
   ]);
@@ -483,7 +513,62 @@ function migrate(s){
   return s;
 }
 const agentById=id=>S.agents.find(a=>a.id===id);
-function L(a,type,msg){if(type==='reject'&&S.log.slice(0,40).some(e=>e.msg===msg&&Date.now()-e.t<30*60e3))return;S.log.unshift({t:Date.now(),a:a?a.name:'Sistema',type,msg});if(S.log.length>500)S.log.length=500;}
+function L(a,type,msg){if(type==='reject'&&S.log.slice(0,40).some(e=>e.msg===msg&&Date.now()-e.t<30*60e3))return;S.log.unshift({t:Date.now(),a:a?a.name:'Sistema',type,msg});if(S.log.length>500)S.log.length=500;notifyEvt(type,(a&&S.agents.length>1?a.name+': ':'')+msg);}
+
+/* ---------- avisos: Telegram y navegador ---------- */
+const nset=()=>S.settings.notify||(S.settings.notify={token:'',chat:'',ops:true,daily:true,bk:false,sys:false});
+const tgReady=()=>{const n=nset();return !!(n.token&&n.chat);};
+const TG=(m)=>`https://api.telegram.org/bot${nset().token.trim()}/${m}`;
+function tgPost(text){if(!tgReady())return;const body=new URLSearchParams({chat_id:nset().chat.trim(),text,disable_web_page_preview:'true'});
+  /* sin leer respuesta: Telegram recibe el mensaje aunque el navegador no deje ver la contestación */
+  fetch(TG('sendMessage'),{method:'POST',body,mode:'no-cors'}).catch(()=>{});}
+function sysPost(text){
+  const n=nset();if(!n.sys||!('Notification' in window)||Notification.permission!=='granted')return;
+  try{if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration)navigator.serviceWorker.getRegistration().then(r=>{if(r)r.showNotification('Automaton',{body:text,tag:'automaton-'+Date.now()});else new Notification('Automaton',{body:text});}).catch(()=>{});
+  else new Notification('Automaton',{body:text});}catch(e){}
+}
+const nq={l:[],t:null};
+function notifyEvt(type,msg){
+  const n=nset(),imp=['dead','tier','spawn','evolve'].includes(type),ops=['open','close'].includes(type)&&n.ops;
+  if(!imp&&!ops)return;if(!tgReady()&&!n.sys)return;
+  nq.l.push((type==='open'?'🟢 ':type==='close'?'🔵 ':'⚠️ ')+msg);
+  clearTimeout(nq.t);nq.t=setTimeout(()=>{const txt=nq.l.slice(0,12).join('\n');nq.l=[];tgPost(txt);sysPost(txt);},4000);
+}
+function totals(){const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a)+a.reserve,0);return {tot,res:ags.reduce((t,a)=>t+a.reserve,0),pl:tot-S.initial,open:ags.reduce((t,a)=>t+a.positions.length,0),alive:alive().length};}
+function dailyText(){
+  const t=totals(),d0=new Date();d0.setHours(0,0,0,0);
+  const today=S.agents.flatMap(a=>a.closed).filter(x=>x.t1>=d0.getTime()),pt=today.reduce((s,x)=>s+x.pnl,0),w=today.filter(x=>x.pnl>0).length;
+  return `📊 Resumen Automaton ${new Date().toLocaleDateString('es-ES')}${S.settings.device?' · '+S.settings.device:''}\nPatrimonio: ${money(t.tot)} (${sgn(t.pl)}, ${pct(t.pl/S.initial)})\nHoy: ${today.length} operaciones, ${w} ganadoras, ${sgn(pt)}\nReserva: ${money(t.res)} · Posiciones abiertas: ${t.open} · Agentes vivos: ${t.alive}`;
+}
+function tgBackup(){
+  if(!tgReady())return false;const fd=new FormData(),day=new Date().toISOString().slice(0,10);
+  fd.append('chat_id',nset().chat.trim());fd.append('caption','Copia de seguridad de Automaton '+day+(S.settings.device?' · '+S.settings.device:'')+'. Para restaurarla: Ajustes → Restaurar desde archivo.');
+  fd.append('document',new Blob([JSON.stringify(S)],{type:'application/json'}),'automaton-'+day+'.json');
+  fetch(TG('sendDocument'),{method:'POST',body:fd,mode:'no-cors'}).catch(()=>{});return true;
+}
+function daily(){
+  const n=nset(),now=new Date(),day=now.toISOString().slice(0,10);
+  if(now.getHours()<22||S.lastDaily===day)return;S.lastDaily=day;
+  if(n.daily){tgPost(dailyText());sysPost(dailyText());}
+  if(n.bk)tgBackup();
+}
+
+/* ---------- informe para revisar con Claude ---------- */
+function report(){
+  const t=totals(),all=S.agents.flatMap(a=>a.closed.map(x=>Object.assign({ag:a.name},x)));
+  const grp=f=>{const g={};all.forEach(x=>{const k=f(x);const o=g[k]||(g[k]={n:0,w:0,p:0});o.n++;if(x.pnl>0)o.w++;o.p+=x.pnl;});return Object.entries(g).sort((a,b)=>b[1].n-a[1].n).map(([k,o])=>`  ${k}: ${o.n} ops, ${Math.round(o.w/o.n*100)}% aciertos, ${sgn(o.p)}`).join('\n')||'  —';};
+  const ex=Object.entries(S.exp).filter(([,e])=>e.n>=2).sort((a,b)=>b[1].pnl-a[1].pnl),fmtE=([k,e])=>`${base(k)} ${e.n} ops ${Math.round(e.w/e.n*100)}% ${sgn(e.pnl)}`;
+  const st=S.settings;
+  return [`INFORME AUTOMATON · ${new Date().toLocaleString('es-ES')}${st.device?' · '+st.device:''}`,
+  `Funcionando desde ${new Date(S.startedAt).toLocaleString('es-ES')} · capital ${money(S.initial)} · patrimonio ${money(t.tot)} · resultado ${sgn(t.pl)} (${pct(t.pl/S.initial)}) · reserva ${money(t.res)}`,
+  `Ajustes: velas ${st.tf}+${HIGHER[st.tf]} · comisión ${(st.fee*100).toFixed(3)}% · deslizamiento ${(st.slip*100).toFixed(3)}% · cortos ${st.shorts?'sí':'no'} · mercados ${['BN','BF','HL'].filter(x=>st.markets[x]).map(x=>SRCNAME[x]).join(', ')}`,
+  `AGENTES`,...S.agents.map(a=>{const s=stats(a),P=a.params;return `  ${a.name} gen${a.gen} ${a.status}/${a.tier} · ${pct(s.ret)} · ${s.n} ops ${s.n?Math.round(s.hit*100)+'%':''} · PF ${s.n?(isFinite(s.pf)?s.pf.toFixed(2):'∞'):'—'} · caída máx ${(s.dd*100).toFixed(1)}% · EMA ${P.emaF}/${P.emaS} riesgo ${(P.riskPct*100).toFixed(2)}% stop ${(+P.stopATR).toFixed(2)} obj ${(+P.tpATR).toFixed(2)} trail ${(+P.trailATR).toFixed(2)} RSI ${Math.round(P.rsiMin)}-${Math.round(P.rsiMax)} min ${P.minScore}`;}),
+  `POR TIPO DE MERCADO`,grp(x=>catOf(x.sym)),`AL ALZA / A LA BAJA`,grp(x=>x.side==='short'?'corto':'largo'),`POR VELAS`,grp(x=>x.tf||'?'),`POR MOTIVO DE SALIDA`,grp(x=>x.reason),
+  `ÚLTIMA EVALUACIÓN: ${ui.summary||'—'}${ui.reasons?' · descartes: '+ui.reasons:''}`,
+  `MEJORES ACTIVOS: ${ex.slice(0,5).map(fmtE).join(' · ')||'—'}`,`PEORES ACTIVOS: ${ex.slice(-5).reverse().filter(([,e])=>e.pnl<0).map(fmtE).join(' · ')||'—'}`,
+  `ÚLTIMAS OPERACIONES`,...all.sort((a,b)=>b.t1-a.t1).slice(0,30).map(x=>`  ${new Date(x.t1).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} ${base(x.sym)} ${x.side==='short'?'corto':'largo'} ${x.tf||''} ${px(x.entry)}→${px(x.exit)} ${pct(x.pct,2)} ${sgn(x.pnl)} ${x.reason} ${Math.round((x.t1-x.t0)/60000)}min`)
+  ].join('\n');
+}
 
 /* ---------- indicadores ---------- */
 function ema(a,n){const k=2/(n+1);let e=a[0];const o=[e];for(let i=1;i<a.length;i++){e=a[i]*k+e*(1-k);o.push(e);}return o;}
@@ -495,6 +580,7 @@ function atr(k,n=14){const tr=i=>Math.max(k[i].h-k[i].l,Math.abs(k[i].h-k[i-1].c
 function analyze(sym,P,tf){
   tf=tf||S.settings.tf;const k=kOf(tf,sym);if(!k||k.length<60)return null;
   const c=k.map(x=>x.c),n=c.length-1,ef=ema(c,P.emaF),es=ema(c,P.emaS);
+  if(!pxFresh(sym,120000))return null; /* sin precio reciente no se analiza */
   const price=market.price[sym],r=rsi(c),a=atr(k);
   const win=k.slice(n-20,n),hi=Math.max(...win.map(x=>x.h)),vavg=win.reduce((t,x)=>t+x.v,0)/20;
   const lo=Math.min(...win.map(x=>x.l));
@@ -509,6 +595,8 @@ function analyze(sym,P,tf){
 /* ---------- agente ---------- */
 /* un corto está cubierto al 100 % con capital propio: vale lo aportado más lo que gana si el precio baja */
 const isShort=p=>p.side==='short';
+/* comisión real de cada mercado: Binance contado (ajustable), Binance Futuros la mitad, Hyperliquid HIP-3 ~90 % */
+const feeOf=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
 const posVal=(p,price)=>isShort(p)?p.qty*(2*p.entry-price):p.qty*price;
 const eq=a=>a.cash+a.positions.reduce((t,p)=>t+Math.max(0,posVal(p,market.price[p.sym]||p.entry)),0);
 const total=a=>eq(a)+a.swept;
@@ -534,22 +622,22 @@ function sweep(a){
   L(a,'reserve',`Beneficio apartado: ${money(x)} a la reserva${dest!==a?' de '+dest.name:''}. Sigue operando con ${money(a.initial)}.`);
 }
 function openPos(a,an,P){
-  const T=TIER[a.tier],e=eq(a),fee=S.settings.fee,slip=S.settings.slip;
+  const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
   let qty=(e*P.riskPct*T.risk)/stopDist;
   qty=Math.min(qty,(e*P.maxPosPct)/entry,a.cash/(entry*(1+fee)));
   if(qty*entry<MIN_NOTIONAL)return 'capital insuficiente para el tamaño mínimo ($5)';
   const cost=qty*entry,f=cost*fee;a.cash-=cost+f;
   const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr,risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f};
-  a.positions.push(p);
+  a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym]);
   L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)}) ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}`);
   return null;
 }
 function closePos(a,p,reason,at){
-  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*S.settings.fee,net=Math.max(0,posVal(p,price))-f,pnl=net-p.basis;
+  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,pnl=net-p.basis;
   a.cash+=net;a.positions=a.positions.filter(x=>x!==p);
   const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/p.basis;
-  a.closed.unshift({sym:p.sym,side:p.side||'long',entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now()});
+  a.closed.unshift({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now()});
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0)a.cooldown[p.sym]=Date.now()+30*60e3;
   L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/p.basis)}) · motivo: ${reason}`);
@@ -565,7 +653,8 @@ function checkExits(a){
       continue;
     }
     if(minsToClose(cls)<=5){closePos(a,p,'cierre de la sesión');continue;}
-    const price=market.price[p.sym];if(!price)continue;
+    if(!pxFresh(p.sym,90000))continue; /* precio viejo: se espera al siguiente */
+    const price=market.price[p.sym];
     if(isShort(p)){
       if(price<(p.low||p.entry)){p.low=price;if(p.low<=p.entry-p.risk)p.stop=Math.min(p.stop,p.low+a.params.trailATR*p.atr);}
       if(price>=p.stop)closePos(a,p,p.stop<p.entry?'trailing':'stop');
@@ -595,15 +684,19 @@ function decide(a,an,P,T){
   if(sh?an.price<an.last-an.atr:an.price>an.last+an.atr)return 'el precio ya se escapó de la señal';
   if((a.cooldown[an.sym]||0)>Date.now())return 'en espera tras una pérdida reciente';
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
+  if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=2)return 'ya tiene dos criptomonedas en la misma dirección';
   if(a.positions.some(p=>p.sym===an.sym))return 'ya en cartera';
   return null;
 }
 const RLAB=[['sin tendencia','sin tendencia clara'],['sobrecomprado','RSI sobrecomprado'],['sobrevendido','RSI sobrevendido'],['sin fuerza','RSI sin fuerza'],['presión vendedora','sin presión vendedora'],['desactivados','cortos desactivados'],['experiencia','vetado por experiencia'],['puntuación','puntuación insuficiente'],
-  ['demasiado baja','se mueve demasiado poco para cubrir comisiones'],['excesiva','volatilidad excesiva'],['no cubre','objetivo no cubre costes'],['escapó','precio ya escapado'],['espera','en espera tras pérdida'],['máximo','límite de posiciones'],['cartera','ya en cartera'],['capital','capital insuficiente']];
+  ['demasiado baja','se mueve demasiado poco para cubrir comisiones'],['excesiva','volatilidad excesiva'],['no cubre','objetivo no cubre costes'],['escapó','precio ya escapado'],['espera','en espera tras pérdida'],['máximo','límite de posiciones'],['misma dirección','demasiadas criptos en la misma dirección'],['cartera','ya en cartera'],['capital','capital insuficiente']];
 const rlab=w=>{const r=RLAB.find(([x])=>w.includes(x));return r?r[1]:w;};
+function dayLoss(a){return a.dayStart?(total(a)-a.dayStart)/a.initial:0;}
 function agentScan(a,manual){
   if(a.status!=='alive')return;
   const P=a.params,T=TIER[a.tier];
+  const lim=S.settings.maxDay||.03,halted=dayLoss(a)<=-lim;
+  if(halted&&a.dayHalt!==a.dayKey){a.dayHalt=a.dayKey;L(a,'tier',`Límite de pérdida diaria alcanzado (${pct(dayLoss(a))} hoy). No abre nuevas operaciones hasta mañana; las abiertas siguen con sus stops.`);}
   if(!manual){
     for(const p of a.positions.slice()){
       p.bars++;const an=analyze(p.sym,P,p.tf);
@@ -611,7 +704,8 @@ function agentScan(a,manual){
       else if(an&&(isShort(p)?an.bullCross:an.bearCross))closePos(a,p,isShort(p)?'cruce alcista de medias':'cruce bajista de medias');
     }
   }
-  const keys=uni().filter(k=>isOpen(k)&&minsToClose(sessOf(k))>15).slice(0,T.syms);
+  const keys=halted?[]:uni().filter(k=>isOpen(k)&&minsToClose(sessOf(k))>15).slice(0,T.syms);
+  if(halted&&a.id===0){ui.summary='Pausa por límite de pérdida diaria: hoy no abre más operaciones';ui.reasons='';ui.scanAt=Date.now();}
   const rows=keys.map(k=>tfs().map(tf=>analyze(k,P,tf)).filter(Boolean).flatMap(an=>S.settings.shorts?[an,an.short]:[an])).filter(x=>x.length)
     .sort((x,y)=>Math.max(...y.map(z=>z.score))-Math.max(...x.map(z=>z.score)));
   if(a.id===0)ui.radar=rows.slice(0,8).map(r=>r.reduce((m,z)=>z.score>m.score?z:m));
@@ -624,7 +718,7 @@ function agentScan(a,manual){
     const lab=rlab(why);tally[lab]=(tally[lab]||0)+1;
     if(best.an.score>=P.minScore-10&&best.an.trend&&logged<3&&!why.includes('espera')&&!why.includes('máximo')){logged++;L(a,'reject',`${base(best.an.sym)} rechazada (velas de ${best.an.tf}): ${why}`);}
   }
-  if(a.id===0){
+  if(a.id===0&&!halted){
     const cl=uni().filter(k=>!isOpen(k)).length;
     ui.summary=`${rows.length} activos con mercado abierto analizados en velas de ${tfs().join(' y ')}${cl?` (${cl} en mercados cerrados, en espera)`:''} · ${opened} operaciones nuevas`;
     ui.reasons=Object.entries(tally).sort((x,y)=>y[1]-x[1]).slice(0,4).map(([l,n])=>`${n} ${l}`).join(' · ');
@@ -658,7 +752,10 @@ function maybeEvolve(a){
   }
 }
 function track(a){
-  const n=Date.now(),v=total(a);
+  const n=Date.now(),v=total(a),day=new Date().toDateString();
+  if(a.dayKey!==day){a.dayKey=day;a.dayStart=v;a.dayHalt=null;
+    for(const k in a.cooldown)if(a.cooldown[k]<n)delete a.cooldown[k];
+    if(a.id===0&&S.meta){const held=new Set(S.agents.flatMap(x=>x.positions.map(p=>p.sym)));for(const k in S.meta)if(!held.has(k)&&!market.meta[k])delete S.meta[k];}}
   if(v>a.peak)a.peak=v;
   const dd=a.peak>0?(a.peak-v)/a.peak:0;if(dd>a.maxDD)a.maxDD=dd;
   if(n-a.lastHist>=10000){a.lastHist=n;a.hist.push([n,v]);if(a.hist.length>1500)a.hist=a.hist.filter((_,i)=>i%2===0);}
@@ -667,15 +764,22 @@ function track(a){
 /* ---------- bucle ---------- */
 let timer=null,busy=false,nextScan=0;
 const alive=()=>S.agents.filter(a=>a.status==='alive');
+let errAt=0;
+function reportErr(e){
+  try{console.error(e);}catch(x){}
+  if(Date.now()-errAt<600000)return;errAt=Date.now();
+  L(null,'info',`Error interno: ${(e&&e.message)||e}. La app sigue funcionando; si se repite, copia el informe (Estadísticas) y mándamelo.`);
+}
 async function tick(manual){
   if(busy)return;busy=true;
   try{
-    if(S.running&&alive().length){
-      const now=Date.now(),gap=now-S.lastSeen;
-      if(gap>120000)L(null,'pause',`Pausa de ${Math.round(gap/60000)} min (app cerrada o en segundo plano): no se operó. Todo lo aprendido y las posiciones siguen guardados; ahora se revisan con el precio actual.`);
-      if(!market.universe.length||now-market.uniAt>30*60e3)await loadUniverse();else await pollPrices();
-      if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
-      S.agents.forEach(checkExits);
+    const now=Date.now(),act=S.running&&alive().length>0;
+    if(act&&now-S.lastSeen>120000)L(null,'pause',`Pausa de ${Math.round((now-S.lastSeen)/60000)} min (app cerrada o en segundo plano): no se operó. Todo lo aprendido y las posiciones siguen guardados; ahora se revisan con el precio actual.`);
+    if(!market.universe.length||now-market.uniAt>30*60e3)await loadUniverse();else await pollPrices();
+    if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
+    /* los stops y objetivos se vigilan siempre, también con el agente en pausa */
+    S.agents.forEach(checkExits);
+    if(act){
       const due=!manual&&now>=nextScan;
       if(due||manual){
         const need=tf=>!market.k[tf]||!Object.keys(market.k[tf]).length||Math.floor(Date.now()/TF_MS[tf])!==(market.kAt||{})[tf];
@@ -683,16 +787,20 @@ async function tick(manual){
         if(due){alive().forEach(a=>agentScan(a,false));alive().forEach(a=>{maybeSpawn(a);maybeEvolve(a);});const m=TF_MS[S.settings.tf];nextScan=Math.ceil(Date.now()/m)*m+4000;}
         else alive().forEach(a=>agentScan(a,true));
       }
-      S.agents.forEach(a=>{if(a.status==='alive'){sweep(a);updateTier(a);}track(a);});
-      S.lastSeen=Date.now();save();
     }
-  }catch(e){}
-  finally{busy=false;render();schedule();}
+    S.agents.forEach(a=>{if(a.status==='alive'){sweep(a);updateTier(a);}track(a);});
+    if(act)daily();
+  }catch(e){if(!(e&&e.message==='sin mercados'))reportErr(e);}
+  finally{
+    /* un corte de red no es una pausa: el reloj de actividad avanza mientras la app esté abierta */
+    if(S.running)S.lastSeen=Date.now();
+    save();busy=false;render();schedule();
+  }
 }
 function schedule(){
-  clearTimeout(timer);if(!S.running||!alive().length)return;
-  const open=S.agents.some(a=>a.positions.length);
-  timer=setTimeout(()=>tick(false),market.err?10000:open?5000:15000);
+  clearTimeout(timer);
+  const open=S.agents.some(a=>a.positions.length),act=S.running&&alive().length>0;
+  timer=setTimeout(()=>tick(false),open?5000:market.err?10000:act?15000:30000);
 }
 
 /* ---------- pantalla encendida ---------- */
@@ -726,7 +834,7 @@ function renderPanel(){
   $('posList').innerHTML=items.length?items.map(([a,p])=>{
     const price=market.price[p.sym]||p.entry,dir=isShort(p)?-1:1,pnl=dir*(price-p.entry)*p.qty,pp=dir*(price-p.entry)/p.entry;
     const pos=Math.max(0,Math.min(1,(price-p.stop)/(p.tp-p.stop)))*100;
-    return `<div class="pos"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)} · ${esc(a.name)}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pp)}</span></div>
+    return `<div class="pos"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pp)}</span></div>
       <div class="bar"><i style="left:${pos}%"></i></div>
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
       <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div></div>`;}).join(''):
@@ -804,7 +912,7 @@ function drawChart(a){
   const cv=$('chart'),dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w)return;
   cv.width=w*dpr;cv.height=h*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);
   const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();
-  const d=a.hist.length>1?a.hist:[[Date.now()-1000,a.initial],[Date.now(),total(a)]];
+  const d=(a.hist.length>1?a.hist:[[a.born,a.initial]]).concat([[Date.now(),total(a)]]); /* el último punto es siempre el valor actual */
   const ys=d.map(x=>x[1]).concat(a.initial);let lo=Math.min(...ys),hi=Math.max(...ys);if(hi-lo<a.initial*.002){lo-=a.initial*.001;hi+=a.initial*.001;}
   const pad=(hi-lo)*.12;lo-=pad;hi+=pad;
   const t0=d[0][0],t1=d[d.length-1][0],X=t=>40+(t-t0)/((t1-t0)||1)*(w-52),Y=v=>h-18-(v-lo)/(hi-lo)*(h-30);
@@ -827,7 +935,9 @@ function renderLin(){
     <div class="note" style="margin-top:8px;font-family:var(--mono)">EMA ${a.params.emaF}/${a.params.emaS} · riesgo ${(a.params.riskPct*100).toFixed(2)}% · stop ${(+a.params.stopATR).toFixed(2)}×ATR · objetivo ${(+a.params.tpATR).toFixed(2)}×ATR · RSI ${Math.round(a.params.rsiMin)}–${Math.round(a.params.rsiMax)}</div></div>`;}).join('');
 }
 function buildSettings(){
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
+   $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -876,8 +986,43 @@ $('capBtn').addEventListener('click',()=>{
   S=fresh(v,S.settings,S.exp);ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;
   L(null,'info',`Capital fijado en ${money(v)}. Todo reiniciado.`);save(true);$('stAgent').innerHTML='';tick(true);
 });
-$('runBtn').addEventListener('click',()=>{S.running=!S.running;S.lastSeen=Date.now();L(null,'info',S.running?'Agente reanudado.':'Agente en pausa manual.');save(true);render();});
+$('runBtn').addEventListener('click',()=>{S.running=!S.running;S.lastSeen=Date.now();L(null,'info',S.running?'Agente reanudado.':'Agente en pausa: no abre operaciones nuevas, pero sigue vigilando los stops de las abiertas.');save(true);render();if(S.running){nextScan=0;tick(false);}});
 $('scanBtn').addEventListener('click',()=>tick(true));
+$('repBtn').addEventListener('click',()=>{
+  const txt=report(),ta=$('repTxt');ta.value=txt;
+  const manual=()=>{ta.hidden=false;ta.focus();ta.select();$('repMsg').textContent='Selecciona todo el texto del recuadro y cópialo.';};
+  try{navigator.clipboard.writeText(txt).then(()=>{$('repMsg').textContent='Informe copiado. Pégalo en el chat con Claude.';$('repMsg').className='note up';},manual);}catch(e){manual();}
+});
+const tgMsg=(t,ok)=>{$('tgMsg').textContent=t;$('tgMsg').className='note '+(ok===true?'up':ok===false?'down':'');};
+$('tgFind').addEventListener('click',async()=>{
+  const n=nset();n.token=$('tgToken').value.trim();if(!n.token){tgMsg('Primero pega el token del bot.',false);return;}
+  tgMsg('Buscando…');
+  try{const r=await fetch(TG('getUpdates'));const j=await r.json();if(!j.ok)throw new Error(j.description||'token no válido');
+    const m=[...(j.result||[])].reverse().map(u=>u.message||u.channel_post||u.my_chat_member).find(x=>x&&x.chat);
+    if(!m){tgMsg('No hay mensajes. Escríbele "hola" a tu bot en Telegram y vuelve a pulsar.',false);return;}
+    n.chat=String(m.chat.id);$('tgChat').value=n.chat;save(true);tgMsg('Chat encontrado'+(m.chat.first_name?' ('+m.chat.first_name+')':'')+'. Pulsa "Enviar prueba".',true);}
+  catch(e){tgMsg(e&&e.name==='TypeError'?'El navegador no deja leer la respuesta. Escribe a @userinfobot en Telegram, copia tu número (Id) y pégalo en "Número de chat".':'Telegram dice: '+e.message,false);}
+});
+$('tgTest').addEventListener('click',async()=>{
+  const n=nset();n.token=$('tgToken').value.trim();n.chat=$('tgChat').value.trim();save(true);
+  if(!tgReady()){tgMsg('Falta el token o el número de chat.',false);return;}
+  const body=new URLSearchParams({chat_id:n.chat,text:'✅ Automaton conectado'+(S.settings.device?' desde '+S.settings.device:'')+'. Aquí recibirás los avisos.\n\n'+dailyText()});
+  try{const r=await fetch(TG('sendMessage'),{method:'POST',body});const j=await r.json();if(!j.ok)throw new Error(j.description);tgMsg('Mensaje enviado. Míralo en Telegram.',true);}
+  catch(e){if(e&&e.name==='TypeError'){fetch(TG('sendMessage'),{method:'POST',body,mode:'no-cors'}).catch(()=>{});tgMsg('Enviado. Comprueba que te ha llegado a Telegram.',true);}else tgMsg('Telegram dice: '+e.message,false);}
+});
+$('sysBtn').addEventListener('click',async()=>{
+  if(!('Notification' in window)){tgMsg('Este navegador no tiene avisos. Usa Telegram.',false);return;}
+  try{const p=await Notification.requestPermission();const n=nset();n.sys=p==='granted';save(true);$('sysBtn').textContent=n.sys?'Activados':'Activar';
+    if(n.sys){sysPost('Avisos activados.');tgMsg('Avisos del navegador activados.',true);}else tgMsg('Permiso denegado. Puedes activarlo en los ajustes del sitio en Chrome.',false);}
+  catch(e){tgMsg('No se pudieron activar aquí. Usa Telegram.',false);}
+});
+$('bkCopy').addEventListener('click',()=>{save(true);const j=JSON.stringify(S);try{navigator.clipboard.writeText(j).then(()=>{$('bkMsg').textContent='Copia copiada ('+Math.round(j.length/1024)+' KB). Guárdala en tus notas o pégala en el otro dispositivo con "Pegar copia".';},()=>$('expBtn').click());}catch(e){$('expBtn').click();}});
+$('bkTg').addEventListener('click',()=>{save(true);$('bkMsg').textContent=tgBackup()?'Copia enviada a tu Telegram como archivo.':'Primero configura Telegram en "Avisos".';});
+$('bkFile').addEventListener('change',e=>{
+  const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{try{const o=JSON.parse(rd.result);if(!valid(o))throw 0;S=migrate(o);save(true);$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;$('bkMsg').textContent='Copia restaurada desde el archivo.';buildSettings();tick(true);}catch(err){$('bkMsg').textContent='Ese archivo no es una copia válida de Automaton.';}e.target.value='';};
+  rd.readAsText(f);
+});
 $('diagBtn').addEventListener('click',()=>{diagnose().catch(()=>{$('diagBtn').disabled=false;$('diagBtn').textContent='Comprobar conexión';});});
 $('quotesBox').addEventListener('toggle',renderQuotes);
 $('netRetry').addEventListener('click',()=>{market.uniAt=0;market.universe=[];market.err=null;$('netRetry').textContent='Conectando…';tick(true).finally(()=>{$('netRetry').textContent='Reintentar';});});
@@ -885,12 +1030,13 @@ $('netCopy').addEventListener('click',()=>{const t=$('netMsg').textContent;try{n
 $('saveSet').addEventListener('click',()=>{
   const s=S.settings,n=id=>parseFloat($(id).value);
   const fee=n('sFee')/100,slip=n('sSlip')/100,uni=Math.round(n('sUni')),kids=Math.round(n('sKids'));
-  if(isFinite(fee)&&fee>=0)s.fee=fee;if(isFinite(slip)&&slip>=0)s.slip=slip;
+  if(isFinite(fee)&&fee>=0)s.fee=fee;{const d=n('sDay')/100;if(isFinite(d)&&d>=.005&&d<=.2)s.maxDay=d;}if(isFinite(slip)&&slip>=0)s.slip=slip;
   if(uni>=5&&uni<=60&&uni!==s.universe){s.universe=uni;market.uniAt=0;}
   ['BN','BF','HL'].forEach(x=>{const v=$('m'+x).value==='1';if(v!==s.markets[x]){s.markets[x]=v;market.uniAt=0;}});
   if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
   if(isFinite(kids)&&kids>=0&&kids<=5)s.maxKids=kids;
   s.repl=$('sRep').value==='1';s.shorts=$('mSh').value==='1';
+  {const nn=nset();nn.token=$('tgToken').value.trim();nn.chat=$('tgChat').value.trim();nn.ops=$('nOps').value==='1';nn.daily=$('nDaily').value==='1';nn.bk=$('nBk').value==='1';s.device=$('devName').value.trim();}
   if($('sTf').value!==s.tf){s.tf=$('sTf').value;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
   const P=S.agents[0].params;
   for(const k in DEF_PARAMS){const v=parseFloat($('p_'+k).value);if(isFinite(v)){const [lo,hi]=BOUNDS[k];P[k]=Math.min(hi,Math.max(lo,INTS.has(k)?Math.round(v):v));}}
@@ -903,8 +1049,8 @@ window.addEventListener('resize',()=>{if(tab==='stats')renderStats();});
 /* copia de seguridad */
 $('expBtn').addEventListener('click',()=>{save(true);const t=$('bk');t.style.display='block';t.value=JSON.stringify(S);t.focus();t.select();$('bkMsg').textContent='Copia lista: cópiala y guárdala en un sitio seguro (notas, correo).';});
 $('impBtn').addEventListener('click',()=>{
-  const t=$('bk');if(t.style.display==='none'){t.style.display='block';t.value='';t.focus();$('bkMsg').textContent='Pega aquí la copia y vuelve a pulsar Restaurar copia.';return;}
-  try{const o=JSON.parse(t.value);if(!valid(o))throw 0;S=o;save(true);t.value='';t.style.display='none';$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;$('bkMsg').textContent='Copia restaurada.';tick(true);}
+  const t=$('bk');if(t.style.display==='none'){t.style.display='block';t.value='';t.focus();$('bkMsg').textContent='Pega aquí la copia y vuelve a pulsar "Pegar copia".';return;}
+  try{const o=JSON.parse(t.value);if(!valid(o))throw 0;S=migrate(o);save(true);t.value='';t.style.display='none';$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;$('bkMsg').textContent='Copia restaurada.';tick(true);}
   catch(e){$('bkMsg').textContent='La copia no es válida.';}
 });
 /* arranque */

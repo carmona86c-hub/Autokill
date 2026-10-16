@@ -170,7 +170,9 @@ const uni=()=>market.universe;
 async function pollPrices(){
   const need=new Set();S.agents.forEach(a=>a.positions.forEach(p=>need.add(p.sym)));
   const all=new Set([...market.universe,...need]),by={BN:[],BF:[],HL:[]};
-  all.forEach(k=>{const s=srcOf(k);if(by[s]&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000))by[s].push(k);});
+  /* con su mercado cerrado no hace falta precio continuo, pero cada fuente se consulta al menos una vez por minuto para saber que sigue conectada */
+  const stale=s=>!(market.src[s]&&market.src[s].ok&&Date.now()-market.src[s].at<60000);
+  all.forEach(k=>{const s=srcOf(k);if(by[s]&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
   const jobs=[];
   if(by.BN.length)jobs.push(jget('/api/v3/ticker/price?symbols='+encodeURIComponent(JSON.stringify(by.BN.map(idOf))))
     .catch(()=>jget('/api/v3/ticker/price'))

@@ -8,5 +8,7 @@ ENV PYTHONPATH=/opt/kronos HF_HOME=/opt/hf OMP_NUM_THREADS=1 MALLOC_ARENA_MAX=2
 # el modelo se descarga al construir, así el servidor arranca rápido al despertar
 RUN python -c "from huggingface_hub import snapshot_download as d; d('NeoQuasar/Kronos-mini'); d('NeoQuasar/Kronos-Tokenizer-2k')"
 WORKDIR /app
-COPY app.py .
+# funciona tanto si Render construye desde la raíz del repositorio como desde la carpeta kronos
+COPY . /src
+RUN if [ -f /src/app.py ]; then cp /src/app.py /app/app.py; else cp /src/kronos/app.py /app/app.py; fi && rm -rf /src
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000}"]

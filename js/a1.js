@@ -1,7 +1,7 @@
 'use strict';
 const LS='automaton.app.real.v1';
-const DEF_PARAMS={riskPct:.01,maxPosPct:.08,maxPos:12,emaF:9,emaS:21,rsiMin:45,rsiMax:70,stopATR:1.5,tpATR:3,trailATR:1.2,minScore:60,maxHold:48};
-const BOUNDS={riskPct:[.002,.03],maxPosPct:[.04,.4],maxPos:[1,20],emaF:[5,15],emaS:[16,40],rsiMin:[35,55],rsiMax:[62,80],stopATR:[.8,3],tpATR:[1.5,6],trailATR:[.6,3],minScore:[50,80],maxHold:[12,120]};
+const DEF_PARAMS={riskPct:.01,maxPosPct:.08,maxPos:12,emaF:9,emaS:21,rsiMin:45,rsiMax:70,stopATR:1.5,tpATR:3,trailATR:2,minScore:60,maxHold:48};
+const BOUNDS={riskPct:[.002,.03],maxPosPct:[.04,.4],maxPos:[1,20],emaF:[5,15],emaS:[16,40],rsiMin:[35,55],rsiMax:[62,80],stopATR:[.8,3],tpATR:[1.5,6],trailATR:[1.2,4],minScore:[50,80],maxHold:[12,120]};
 const PLABEL={riskPct:'Riesgo por operación',maxPosPct:'Máx. por posición',maxPos:'Posiciones máximas',emaF:'EMA rápida',emaS:'EMA lenta',rsiMin:'RSI mínimo',rsiMax:'RSI máximo',stopATR:'Stop (× ATR)',tpATR:'Objetivo (× ATR)',trailATR:'Trailing (× ATR)',minScore:'Puntuación mínima',maxHold:'Velas máx. en posición'};
 const INTS=new Set(['maxPos','emaF','emaS','minScore','maxHold']);
 const MIN_NOTIONAL=5;
@@ -65,6 +65,14 @@ const BF_CAP=40; /* Binance Futuros ya tiene cientos de contratos TradFi: se vig
 async function pool(items,n,fn){const q=items.slice();await Promise.all(Array.from({length:Math.min(n,q.length)},async()=>{while(q.length){const it=q.shift();try{await fn(it);}catch(e){}}}));}
 
 async function uniBN(){
+  /* criptomonedas en Binance Futuros (contratos perpetuos): la mitad de comisión que en contado */
+  if(S.settings.cryptoFut!==false){
+    const [info,t24]=await Promise.all([fget(FAPI+'/fapi/v1/exchangeInfo'),fget(FAPI+'/fapi/v1/ticker/24hr')]);
+    const perp=new Set(info.symbols.filter(x=>x.status==='TRADING'&&x.quoteAsset==='USDT'&&x.contractType==='PERPETUAL'&&(x.underlyingType||'COIN')==='COIN').map(x=>x.symbol));
+    const list=t24.filter(x=>perp.has(x.symbol)&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0).sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
+    market.lists.BN=list.map(x=>{const k='BF:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',sess:'24x7',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
+    ok('BN');return;
+  }
   const t=await jget('/api/v3/ticker/24hr');
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
@@ -204,7 +212,7 @@ async function pollPrices(){
 const WSURL={BN:['wss://stream.binance.com:9443/ws/!miniTicker@arr','wss://data-stream.binance.vision/ws/!miniTicker@arr'],BF:['wss://fstream.binance.com/ws/!miniTicker@arr'],HL:['wss://api.hyperliquid.xyz/ws']};
 const WS={s:{},at:{},t0:{},try:{},next:{},dex:new Set(),fast:0,ping:0};
 const wsLive=s=>!!WS.at[s]&&Date.now()-WS.at[s]<20000;
-function wsTracked(src){const out=new Set(market.lists[src]||[]);if(S)S.agents.forEach(a=>a.positions.forEach(p=>{if(srcOf(p.sym)===src)out.add(p.sym);}));return out;}
+function wsTracked(src){const out=new Set([...(market.lists[src]||[]),...market.universe.filter(k=>srcOf(k)===src)]);if(S)S.agents.forEach(a=>a.positions.forEach(p=>{if(srcOf(p.sym)===src)out.add(p.sym);}));return out;}
 function wsMsg(src,list){
   const now=Date.now(),tr=wsTracked(src);
   list.forEach(([k,v])=>{if(tr.has(k))setPx(k,v);});
@@ -237,7 +245,7 @@ function wsSync(){
   const m=S.settings.markets,now=Date.now();
   for(const src of ['BN','BF','HL']){
     const ws=WS.s[src],kill=()=>{WS.s[src]=null;WS.at[src]=0;try{ws.close();}catch(e){}};
-    if(!m[src]){if(ws)kill();continue;}
+    if(!(m[src]||(src==='BF'&&m.BN&&S.settings.cryptoFut!==false))){if(ws)kill();continue;}
     /* conexión colgada (no abre en 20 s o lleva 1 min sin datos): se cierra y se vuelve a abrir */
     if(ws&&((ws.readyState===0&&now-WS.t0[src]>20000)||(ws.readyState===1&&now-(WS.at[src]||WS.t0[src])>60000))){kill();WS.next[src]=0;}
     if(!WS.s[src])wsOpen(src);
@@ -251,22 +259,22 @@ async function fetchKlines(tf){
   if(!market.raw)market.raw={};
   const toK=k=>k.map(r=>({t:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5],ct:r[6]}));
   const store=(k,arr)=>{
-    if(srcOf(k)==='BN'){market.k[tf][k]=arr.filter(c=>c.ct<now).slice(-300);return;}
+    if(srcOf(k)==='BN'){market.k[tf][k]=arr.filter(c=>c.ct<now).slice(-1000);return;}
     const rk=tf+'|'+k,old=market.raw[rk]?market.raw[rk].c:[],m=new Map(old.map(c=>[c.t,c]));arr.forEach(c=>m.set(c.t,c));
     const all=[...m.values()].sort((x,y)=>x.t-y.t).slice(-3000);market.raw[rk]={tf,c:all};
-    const cls=sessOf(k);market.k[tf][k]=all.filter(c=>c.ct<now&&sessOpen(cls,c.t)).slice(-150);
+    const cls=sessOf(k);market.k[tf][k]=all.filter(c=>c.ct<now&&sessOpen(cls,c.t)).slice(-1000);
   };
   /* sin historial previo: se piden varios días para reunir velas de sesión real; después, solo las nuevas */
   const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
     pool(bin,6,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
-      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=300`);
-      /* peso bajo: 499 velas la primera vez, y luego solo las nuevas (hasta 99) */
-      else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit=499'));}
+      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=1000`);
+      /* 1000 velas la primera vez (historia para la automejora), y luego solo las nuevas (hasta 99) */
+      else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit='+(catOf(k)==='Cripto'?1000:499)));}
       }catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail(srcOf(k),e);throw e;}
       store(k,toK(r));}),
-    pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':2,'5m':4,'15m':8,'1h':20}[tf]||4)*864e5;
+    pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':1,'5m':4,'15m':11,'1h':42}[tf]||4)*864e5;
       let r;try{r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});}catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail('HL',e);throw e;}
       store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); })
   ]);

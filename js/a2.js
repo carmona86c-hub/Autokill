@@ -193,13 +193,16 @@ function openPos(a,an,P){
   L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)}) ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
   return null;
 }
-function closePos(a,p,reason,at){
+/* user: 'limit' (tu límite de ganancia) o 'manual' (vendida por ti). Esas ventas no cuentan en el aprendizaje del agente:
+   van a tu registro aparte, donde se sigue el precio para saber qué habría hecho el plan del agente */
+function closePos(a,p,reason,at,user){
   const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,pnl=net-p.basis;
   a.cash+=net;a.positions=a.positions.filter(x=>x!==p);
-  const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/p.basis;
-  a.closed.unshift({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0});
+  if(!user){const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/p.basis;}
+  a.closed.unshift(Object.assign({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0},user?{user}:{}));
   if(a.closed.length>500)a.closed.length=500;
-  if(pnl<0)a.cooldown[p.sym]=Date.now()+30*60e3;
+  if(pnl<0&&!user)a.cooldown[p.sym]=Date.now()+30*60e3;
+  if(user)labAdd(a,p,user,price,pnl);
   L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/p.basis)}) · motivo: ${reason}`);
 }
 function checkExits(a){
@@ -214,7 +217,9 @@ function checkExits(a){
     }
     if(minsToClose(cls)<=5){closePos(a,p,'cierre de la sesión');continue;}
     if(!pxFresh(p.sym,90000))continue; /* precio viejo: se espera al siguiente */
-    const price=market.price[p.sym];
+    const price=market.price[p.sym],cap=S.settings.capNet;
+    /* tu límite de ganancia: en cuanto vender deja esa cantidad limpia, se vende (lo demás sigue igual) */
+    if(cap>0&&netIfClose(p,price)>=cap){closePos(a,p,'límite de ganancia '+money(cap),undefined,'limit');continue;}
     if(isShort(p)){
       if(price<(p.low||p.entry)){p.low=price;if(p.low<=p.entry-p.risk)p.stop=Math.min(p.stop,p.low+a.params.trailATR*p.atr);}
       if(price>=p.stop)closePos(a,p,p.stop<p.entry?'trailing':'stop');
@@ -225,6 +230,41 @@ function checkExits(a){
       else if(price>=p.tp)closePos(a,p,'objetivo');
     }
   }
+}
+/* ---------- tu registro (ventas con límite y ventas manuales) ----------
+   No cambia las reglas del agente. Guarda cada venta tuya con su contexto y sigue el precio después para saber qué habría
+   hecho el plan del agente (su stop, su objetivo con trailing y su tiempo máximo). Así se puede revisar si te compensa. */
+const labOf=()=>S.lab||(S.lab={list:[]});
+function labAdd(a,p,kind,price,pnl){
+  const now=Date.now(),mk=market.price[p.sym]||price,sh=isShort(p),span=sh?p.entry-p.tp:p.tp-p.entry;
+  labOf().list.unshift({kind,limit:kind==='limit'?S.settings.capNet:null,ag:a.name,sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,qty:p.qty,basis:p.basis,
+    t0:p.openedAt,t1:now,exit:price,pnl,prog:span>0?+(((sh?p.entry-mk:mk-p.entry)/span).toFixed(3)):null,
+    w:{stop:p.stop,tp:p.tp,until:p.until||now+6*3600e3,high:Math.max(p.high||p.entry,mk),low:Math.min(p.low||p.entry,mk),risk:p.risk,atr:p.atr,trail:a.params.trailATR,last:mk,seen:now},cf:null});
+  if(S.lab.list.length>300)S.lab.list.length=300;
+}
+function labWatch(){
+  if(!S.lab)return;const now=Date.now();
+  for(const e of S.lab.list){
+    if(e.cf)continue;const w=e.w,fin=(x,why)=>{e.cf={pnl:netIfClose(e,x),exit:x,why,t:now};};
+    if(!sessOpen(sessOf(e.sym),now)){fin(w.last||e.exit,'cierre del mercado');continue;}
+    if(!pxFresh(e.sym,120000)){if(now-w.seen>3*3600e3)e.cf={pnl:null,why:'sin precio para seguirla',t:now};continue;}
+    const pr=market.price[e.sym];w.seen=now;w.last=pr;
+    if(isShort(e)){
+      if(pr<w.low){w.low=pr;if(w.low<=e.entry-w.risk)w.stop=Math.min(w.stop,w.low+w.trail*w.atr);}
+      if(pr>=w.stop)fin(w.stop,w.stop<e.entry?'trailing':'stop');else if(pr<=w.tp)fin(w.tp,'objetivo');
+    }else{
+      if(pr>w.high){w.high=pr;if(w.high>=e.entry+w.risk)w.stop=Math.max(w.stop,w.high-w.trail*w.atr);}
+      if(pr<=w.stop)fin(w.stop,w.stop>e.entry?'trailing':'stop');else if(pr>=w.tp)fin(w.tp,'objetivo');
+    }
+    if(!e.cf&&now>=w.until)fin(pr,'tiempo máximo');
+  }
+}
+/* resumen: lo que ganaste con tus decisiones frente a lo que habría dado el plan del agente en esas mismas operaciones */
+function labSum(kind,limit){
+  const l=(S.lab?S.lab.list:[]).filter(e=>e.kind===kind&&(limit==null||e.limit===limit)),d=l.filter(e=>e.cf&&e.cf.pnl!=null);
+  const you=d.reduce((t,e)=>t+e.pnl,0),plan=d.reduce((t,e)=>t+e.cf.pnl,0);
+  return {n:l.length,pnl:l.reduce((t,e)=>t+e.pnl,0),done:d.length,you,plan,diff:you-plan,better:d.filter(e=>e.pnl>e.cf.pnl).length,pend:l.filter(e=>!e.cf).length,
+    held:l.length?l.reduce((t,e)=>t+(e.t1-e.t0),0)/l.length/60000:0};
 }
 /* experiencia: el historial propio con cada activo ajusta la puntuación y puede vetarlo */
 function xp(sym){const e=S.exp[sym];if(!e||e.n<3)return {adj:0,veto:false,e};const wr=(e.w+1)/(e.n+2);return {adj:Math.round((wr-.5)*30),veto:e.n>=6&&e.pnl<0&&wr<.35,e};}

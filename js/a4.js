@@ -216,28 +216,8 @@ function drawSpark(cv,p){
    Con las velas reales ya descargadas, simula las reglas del agente con distintos límites de ganancia limpia por operación
    (y sin límite, que es su plan) y compara. Es conocimiento para ti: no cambia cómo opera el agente en automático. */
 const CAP_LIMS=[.03,.05,.1,.15,.2,.3,.5,1];
-function simCapR(s,P,i0,i1,cost,shorts,rL){
-  const {k,c,R,A,HI,LO,VA}=s,ef=s.E[P.emaF]||(s.E[P.emaF]=ema(c,P.emaF)),es=s.E[P.emaS]||(s.E[P.emaS]=ema(c,P.emaS)),out=[];let p=null;
-  for(let i=Math.max(i0,60);i<i1;i++){
-    if(p){
-      const b=k[i];let x=null;p.bars++;
-      if(p.sh){const t=Math.max(p.tp,p.cap);if(b.h>=p.stop)x=p.stop;else if(b.l<=t)x=t;else if(b.l<p.low){p.low=b.l;if(p.low<=p.e-p.r)p.stop=Math.min(p.stop,p.low+P.trailATR*p.atr);}}
-      else{const t=Math.min(p.tp,p.cap);if(b.l<=p.stop)x=p.stop;else if(b.h>=t)x=t;else if(b.h>p.high){p.high=b.h;if(p.high>=p.e+p.r)p.stop=Math.max(p.stop,p.high-P.trailATR*p.atr);}}
-      if(x===null&&(p.bars>=P.maxHold||(p.sh?ef[i]>es[i]:ef[i]<es[i])||(p.bars>=16&&(p.sh?p.e-b.c:b.c-p.e)/p.r<.25)))x=b.c;
-      if(x!==null){out.push({r:(p.sh?p.e-x:x-p.e)/p.e-cost,bars:p.bars});p=null;}
-      continue;
-    }
-    if(i+1>=i1)break;
-    const a=A[i],ap=a/c[i];if(!(ap>=.002&&ap<=.06)||P.tpATR*ap<.006)continue;
-    const r=R[i],vol=k[i].v>1.3*VA[i];let sh=null;
-    if(ef[i]>es[i]&&c[i]>es[i]&&r>=P.rsiMin&&r<=P.rsiMax&&40+(es[i]>es[i-3]?10:0)+(r>=50&&r<=65?5:0)+(c[i]>HI[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=false;
-    else if(shorts&&ef[i]<es[i]&&c[i]<es[i]&&r<=100-P.rsiMin&&r>=100-P.rsiMax&&40+(es[i]<es[i-3]?10:0)+(r<=50&&r>=35?5:0)+(c[i]<LO[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=true;
-    if(sh===null)continue;
-    const e=k[i+1].o,sd=P.stopATR*a;
-    p={sh,e,r:sd,atr:a,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*a:e+P.tpATR*a,cap:isFinite(rL)?(sh?e*(1-rL-cost):e*(1+rL+cost)):(sh?-Infinity:Infinity),high:e,low:e,bars:0};
-  }
-  return out;
-}
+/* mismas salidas que en real (ver simCore), con el límite de ganancia como variante */
+const simCapR=(s,P,i0,i1,cost,shorts,rL)=>simCore(s,P,i0,i1,cost,shorts,rL);
 function capStudy(force){
   const now=Date.now(),cs=S.capStudy;if(!force&&cs&&now-cs.at<3600e3)return cs&&'reciente';
   const a=S.agents[0];if(!a||a.status!=='alive')return null;
@@ -307,9 +287,13 @@ function renderLog(){
 function stats(a){
   if(a._st)return Object.assign({},a._st,{ret:ret(a),pnl:total(a)-a.initial}); /* en modo servidor llegan ya calculadas con todo el historial */
   const c=a.closed,w=c.filter(x=>x.pnl>0),l=c.filter(x=>x.pnl<=0);
-  const gw=w.reduce((t,x)=>t+x.pnl,0),gl=-l.reduce((t,x)=>t+x.pnl,0);
-  return {n:c.length,hit:c.length?w.length/c.length:0,aw:w.length?gw/w.length:0,al:l.length?gl/l.length:0,pf:gl>0?gw/gl:(gw>0?Infinity:0),
-    best:c.length?Math.max(...c.map(x=>x.pnl)):0,worst:c.length?Math.min(...c.map(x=>x.pnl)):0,dd:a.maxDD,ret:ret(a),pnl:total(a)-a.initial};
+  const gw=w.reduce((t,x)=>t+x.pnl,0),gl=-l.reduce((t,x)=>t+x.pnl,0),aw=w.length?gw/w.length:0,al=l.length?gl/l.length:0;
+  /* salud: lo que deja de media cada operación, cuánto se gana por cada unidad perdida y el acierto mínimo para no perder */
+  const mf=c.filter(x=>x.mfe!=null),lm=mf.filter(x=>x.pnl<=0);
+  return {n:c.length,hit:c.length?w.length/c.length:0,aw,al,pf:gl>0?gw/gl:(gw>0?Infinity:0),
+    best:c.length?Math.max(...c.map(x=>x.pnl)):0,worst:c.length?Math.min(...c.map(x=>x.pnl)):0,dd:a.maxDD,ret:ret(a),pnl:total(a)-a.initial,
+    exp:c.length?(gw-gl)/c.length:0,payoff:al>0?aw/al:(aw>0?Infinity:0),need:aw+al>0?al/(aw+al):0,
+    nm:mf.length,lostRun:lm.length?lm.filter(x=>x.mfe>=1).length/lm.length:null,mfeW:mf.filter(x=>x.pnl>0).length?mf.filter(x=>x.pnl>0).reduce((t,x)=>t+x.mfe,0)/mf.filter(x=>x.pnl>0).length:null};
 }
 function renderStats(){
   const sel=$('stAgent');
@@ -318,7 +302,11 @@ function renderStats(){
   const k=(l,v,c='')=>`<div class="card kpi"><span class="lbl">${l}</span><b class="${c}">${v}</b></div>`;
   $('kpis').innerHTML=k('Resultado',sgn(s.pnl)+' · '+pct(s.ret),s.pnl>=0?'up':'down')+k('Caída máxima','−'+(s.dd*100).toFixed(2)+'%',s.dd>.1?'down':'')+
     k('Aciertos',s.n?(s.hit*100).toFixed(0)+'% de '+s.n:'—')+k('Factor de beneficio',s.n?(isFinite(s.pf)?s.pf.toFixed(2):'∞'):'—')+
-    k('Ganancia media',s.n?money(s.aw):'—','up')+k('Pérdida media',s.n?money(s.al):'—','down')+k('Mejor operación',s.n?sgn(s.best):'—')+k('Peor operación',s.n?sgn(s.worst):'—');
+    k('Ganancia media',s.n?money(s.aw):'—','up')+k('Pérdida media',s.n?money(s.al):'—','down')+k('Mejor operación',s.n?sgn(s.best):'—')+k('Peor operación',s.n?sgn(s.worst):'—')+
+    k('Deja por operación',s.n?sgn(s.exp||0):'—',(s.exp||0)>=0?'up':'down')+k('Gana por cada $1 perdido',s.n&&s.payoff!=null?(isFinite(s.payoff)?'$'+s.payoff.toFixed(2).replace('.',','):'∞'):'—',(s.payoff||0)>=1?'up':'down')+
+    k('Acierto necesario',s.n&&s.need!=null?Math.round(s.need*100)+'% (tienes '+Math.round(s.hit*100)+'%)':'—',s.n&&s.hit>=s.need?'up':'down')+
+    k('Muestra',s.n?(s.n<100?s.n+' ops · aún poca':s.n+' ops · fiable'):'—',s.n>=100?'up':'')+
+    (s.nm?k('Pérdidas que fueron +1R a favor',s.lostRun==null?'—':Math.round(s.lostRun*100)+'%',s.lostRun>.25?'down':'up')+k('Recorrido medio de las ganadoras',s.mfeW==null?'—':s.mfeW.toFixed(1)+'R'):'');
   $('trades').innerHTML=a.closed.length?`<table><tr><th>Activo</th><th>Entrada</th><th>Salida</th><th>Resultado</th><th>Motivo</th></tr>${a.closed.slice(0,40).map(t=>`<tr><td>${esc(base(t.sym))}${t.side==='short'?' <span class="side s">corto</span>':''}</td><td>${px(t.entry)}</td><td>${px(t.exit)}</td><td class="${t.pnl>=0?'up':'down'}">${sgn(t.pnl)} ${pct(t.pct,1)}</td><td>${esc(t.reason)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin operaciones cerradas.</div>';
   const ex=Object.entries(S.exp).sort((x,y)=>y[1].n-x[1].n);
   $('expT').innerHTML=ex.length?`<table><tr><th>Activo</th><th>Operaciones</th><th>Aciertos</th><th>Resultado</th><th>Ajuste</th></tr>${ex.map(([sym,e])=>{const x=xp(sym);return `<tr><td>${esc(base(sym))} <span class="note">${catOf(sym)}</span></td><td>${e.n}</td><td>${Math.round(e.w/e.n*100)}%</td><td class="${e.pnl>=0?'up':'down'}">${sgn(e.pnl)}</td><td>${x.veto?'vetado':x.adj?(x.adj>0?'+':'')+x.adj:'—'}</td></tr>`;}).join('')}</table>`:'<div class="empty">Aún sin experiencia: se forma con cada operación cerrada.</div>';

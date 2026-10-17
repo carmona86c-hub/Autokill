@@ -25,7 +25,7 @@ async function tick(manual){
         const need=tf=>!market.k[tf]||!Object.keys(market.k[tf]).length||Math.floor(Date.now()/TF_MS[tf])!==(market.kAt||{})[tf];
         if(due||need(S.settings.tf))await Promise.all(tfs().filter(tf=>tf===S.settings.tf?true:need(tf)).map(tf=>fetchKlines(tf).catch(()=>{})));
         ui.krQ=[];
-        if(due){alive().forEach(a=>agentScan(a,false));alive().forEach(a=>{maybeSpawn(a);maybeEvolve(a);});const m=TF_MS[S.settings.tf];nextScan=Math.ceil(Date.now()/m)*m+4000;}
+        if(due){alive().forEach(a=>agentScan(a,false));alive().forEach(a=>{maybeSpawn(a);maybeEvolve(a);});capStudy();const m=TF_MS[S.settings.tf];nextScan=Math.ceil(Date.now()/m)*m+4000;}
         else alive().forEach(a=>agentScan(a,true));
         if(krOn()&&!KR.busy){
           const q=new Map();(ui.krQ||[]).sort((x,y)=>y.s-x.s).forEach(x=>{const id=krKey(x.k,x.tf);if(!q.has(id)&&!krEntry(x.k,x.tf)&&KR.tried[id]!==lastT(x.k,x.tf))q.set(id,x);});
@@ -68,8 +68,7 @@ function updateHero(){
   $('hTotal').textContent=money(tot);
   const el=$('hPnl');el.className='pnl '+(pl>=0?'up':'down');
   el.textContent=`${pl>=0?'▲':'▼'} ${sgn(pl)} (${pct(pl/S.initial)}) sobre ${money(S.initial)}`;
-  if(!document.getElementById('hVault'))el.insertAdjacentHTML('afterend','<div id="hVault" class="pnl" style="font-size:12.5px;color:var(--money);margin-top:2px" hidden></div>');
-  {const hv=$('hVault');hv.hidden=!(vault>=.005);if(vault>=.005)hv.textContent=`🔒 Reservado ${money(vault)} · congelado`;}
+  $('tVault').textContent=money(vault);
   $('tOp').textContent=money(op);$('tRes').textContent=String(npos);
   $('tLossL').textContent=pl>=0?'Ganado':'Perdido';
   const le=$('tLoss');le.textContent=money(Math.abs(pl));le.className=pl>=0?'up':'down';
@@ -118,14 +117,23 @@ function renderMode(){
     <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual. Lo que gane por encima de su capital (${money(S.agents[0].initial)}) pasa a la cartera reservada, congelada.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
     '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
     ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total.</div>`:''}
+    ${(()=>{const cs=S.capStudy;if(!cs)return '<div class="lab"><div class="lbl">Estudio de variantes</div><div class="note">En cuanto haya velas suficientes, la app probará varios límites sobre el mercado real reciente y te dirá cuál habría funcionado mejor.</div></div>';
+      const real=v=>{const x=labSum('limit',v);return x.n?`${x.n} · ${sgn(x.pnl)}`:'—';};
+      return `<div class="lab"><div class="lbl">Estudio de variantes · velas reales recientes</div>
+      <div class="tw"><table class="cs"><tr><th>Límite</th><th>Ops</th><th>Resultado</th><th>Aciertos</th><th>Tú en real</th></tr>
+      <tr><td>Plan</td><td>${cs.plan.n}</td><td class="${cs.plan.usd>=0?'up':'down'}">${sgn(cs.plan.usd)}</td><td>${Math.round(cs.plan.hit*100)}%</td><td>—</td></tr>
+      ${cs.rows.map(r=>`<tr class="${cs.best===r.lim?'best':''}"><td>${c2(r.lim)}</td><td>${r.n}</td><td class="${r.usd>=0?'up':'down'}">${sgn(r.usd)}</td><td>${Math.round(r.hit*100)}%</td><td>${real(r.lim)}</td></tr>`).join('')}</table></div>
+      <div class="note" style="margin-top:6px">${cs.best?`Con las mismas señales, el límite que mejor habría ido es <b style="color:var(--money)">${money(cs.best)}</b>.`:'Ningún límite habría superado al plan del agente en este periodo.'} Simulado con posiciones de ${money(cs.notional)}, actualizado ${clock(cs.at)}. Es una referencia del pasado reciente, no una garantía.</div>
+      <div class="row" style="margin-top:6px">${cs.best&&cs.best!==cap?`<button class="btn" type="button" data-v="${cs.best}" style="padding:6px 10px">Usar ${money(cs.best)}</button>`:''}<button class="btn" type="button" data-study="1" style="padding:6px 10px">Recalcular</button></div></div>`;})()}
     <div class="lab"><div class="lbl" style="margin-bottom:4px">Tu registro · no cambia el aprendizaje del agente</div>${line('Con límite',s)+line('Ventas manuales',m)||'<div class="note">Aquí se irán guardando las ventas hechas con tu límite o a mano, y lo que habría pasado con el plan del agente, para ver si te compensa.</div>'}</div>`;
 }
 $('tMode').addEventListener('click',()=>{modeOpen=!modeOpen;if(!modeOpen)modeLim=false;renderMode();});
 async function setCap(v){const r=await act('mode',{cap:v});if(!r.ok)alert(r.msg);modeLim=v!=null;renderMode();}
-$('modeDrop').addEventListener('click',e=>{
+$('modeDrop').addEventListener('click',async e=>{
   const b=e.target.closest&&e.target.closest('button');if(!b)return;
   if(b.dataset.m==='auto'){modeLim=false;setCap(null);return;}
   if(b.dataset.m==='lim'){modeLim=true;renderMode();const i=$('capIn2');if(i&&!capV())i.focus();return;}
+  if(b.dataset.study){const r=await act('study');if(r&&!r.ok)alert(r.msg);renderMode();return;}
   if(b.dataset.v)return setCap(+b.dataset.v);
   if(b.dataset.d){const i=$('capIn2'),cur=parseFloat(String(i&&i.value||'').replace(',','.'))||capV()||.1;setCap(Math.max(.01,Math.round((cur+(+b.dataset.d)*.01)*100)/100));}
 });
@@ -135,20 +143,22 @@ function renderPanel(){
   const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));
   const ae=document.activeElement,typing=ae&&ae.tagName==='INPUT'&&ae.closest&&ae.closest('#posList'); /* no se redibuja mientras escribes el límite */
   if(!typing){$('posList').innerHTML=items.length?items.map(([a,p])=>{
-    const net=netIfClose(p,market.price[p.sym]||p.entry);
-    const price=market.price[p.sym]||p.entry,dir=isShort(p)?-1:1,pnl=dir*(price-p.entry)*p.qty,pp=dir*(price-p.entry)/p.entry;
-    const pos=Math.max(0,Math.min(1,(price-p.stop)/(p.tp-p.stop)))*100;
-    return `<div class="pos"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pp)}</span></div>
-      ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${esc(p.sym)}|${p.openedAt}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
+    const price=market.price[p.sym]||p.entry,net=netIfClose(p,price),dir=isShort(p)?-1:1,pnl=dir*(price-p.entry)*p.qty,pp=dir*(price-p.entry)/p.entry;
+    const key=esc(p.sym)+'|'+p.openedAt,open=posOpen.has(p.sym+'|'+p.openedAt),pos=Math.max(0,Math.min(1,(price-p.stop)/(p.tp-p.stop)))*100;
+    return `<div class="pos"><button class="prow" type="button" data-tog="${key}" aria-expanded="${open}">
+        <span class="pn">${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span><small>${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''} · ${Math.round((Date.now()-p.openedAt)/60000)} min</small></span>
+        <canvas class="spark" data-k="${key}" aria-hidden="true"></canvas>
+        <span class="pv"><b class="${pnl>=0?'up':'down'}">${sgn(pnl)}</b>${pct(pp)} · neto <span class="${net>=0?'up':'down'}">${sgn(net)}</span></span>
+        <span class="chev">${open?'▴':'▾'}</span></button>
+      ${open?`<div class="pd">
+      ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${key}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
-      <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div>
-      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
-      ${(()=>{const key=esc(p.sym)+'|'+p.openedAt,open=sellOpen.has(p.sym+'|'+p.openedAt),mOpen=sessOpen(sessOf(p.sym),Date.now());
-        return `<button class="btn" type="button" data-tog="${key}" aria-expanded="${open}" style="padding:4px 10px;font-size:12px;justify-self:start">Venta de acción ${open?'▴':'▾'}</button>`+(open?`
-      <div class="row" style="gap:8px;align-items:center"><button class="btn" type="button" data-sell="${key}" ${mOpen?'':'disabled'} style="padding:6px 12px;border-color:var(--down);color:var(--down)">Vender ahora</button>
-        <span class="note">${mOpen?`Se vende ya a precio de mercado (${px(price)}). Te quedarían <b class="${net>=0?'up':'down'}">${sgn(net)}</b> limpios, con comisiones.`:'El mercado de este activo está cerrado: se podrá vender cuando abra.'}</span></div>`:'');})()}</div>`;}).join(''):
+      <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>velas ${p.tf||S.settings.tf}</span></div>
+      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div></div>`:''}</div>`;}).join(''):
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
-  document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const [sym,t]=cv.dataset.k.split('|');const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);if(it)drawPos(cv,it[1]);});}
+  const find=k=>{const i=k.lastIndexOf('|'),sym=k.slice(0,i).replace(/&amp;/g,'&'),t=k.slice(i+1);const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);return it&&it[1];};
+  document.querySelectorAll('#posList canvas.spark').forEach(cv=>{const p=find(cv.dataset.k);if(p)drawSpark(cv,p);});
+  document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const p=find(cv.dataset.k);if(p)drawPos(cv,p);});}
   renderMarkets();renderQuotes();
   const mp=S.agents[0].params.minScore;
   $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
@@ -187,17 +197,67 @@ function drawPos(cv,p){
   const tfm=t=>new Date(t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
   g.fillStyle=mu;g.textAlign='left';g.fillText(tfm(t0),0,h-6);g.textAlign='right';g.fillText(tfm(t1)+' · velas '+(p.tf||S.settings.tf),W,h-6);
 }
-/* venta manual de cada posición: la pestaña se abre y «Vender ahora» la cierra al precio de mercado */
-const sellOpen=new Set();
-$('posList').addEventListener('click',async e=>{
-  const tg=e.target.closest&&e.target.closest('button[data-tog]');
-  if(tg){const k=tg.dataset.tog.replace(/&amp;/g,'&');sellOpen.has(k)?sellOpen.delete(k):sellOpen.add(k);render();return;}
-  const b=e.target.closest&&e.target.closest('button[data-sell]');if(!b)return;
-  const key=b.dataset.sell.replace(/&amp;/g,'&'),i=key.lastIndexOf('|'),sym=key.slice(0,i),t=key.slice(i+1);
-  b.disabled=true;b.textContent='Vendiendo…';const r=await act('possell',{sym,t});
-  if(r.ok)sellOpen.delete(key);else b.disabled=false;
-  render();if(!r.ok)alert(r.msg);
+/* cada posición abierta es un desplegable: resumen con mini gráfica; al tocarla, el detalle */
+const posOpen=new Set();
+$('posList').addEventListener('click',e=>{
+  const tg=e.target.closest&&e.target.closest('button[data-tog]');if(!tg)return;
+  const k=tg.dataset.tog.replace(/&amp;/g,'&');posOpen.has(k)?posOpen.delete(k):posOpen.add(k);render();
 });
+function drawSpark(cv,p){
+  const c=posCandles(p).slice(-30).map(x=>x.c),dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||c.length<2)return;
+  cv.width=w*dpr;cv.height=h*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);
+  const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();
+  let lo=Math.min(...c,p.entry),hi=Math.max(...c,p.entry);if(hi-lo<hi*1e-6){hi+=hi*1e-4;lo-=hi*1e-4;}
+  const X=i=>1+i*(w-2)/(c.length-1),Y=v=>2+(hi-v)/(hi-lo)*(h-4),good=isShort(p)?c[c.length-1]<=p.entry:c[c.length-1]>=p.entry;
+  g.strokeStyle=col('--mute');g.setLineDash([2,2]);g.lineWidth=1;g.beginPath();g.moveTo(0,Y(p.entry));g.lineTo(w,Y(p.entry));g.stroke();g.setLineDash([]);
+  g.strokeStyle=col(good?'--up':'--down');g.lineWidth=1.5;g.beginPath();c.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));g.stroke();
+}
+/* ---------- estudio de variantes del límite de ganancia ----------
+   Con las velas reales ya descargadas, simula las reglas del agente con distintos límites de ganancia limpia por operación
+   (y sin límite, que es su plan) y compara. Es conocimiento para ti: no cambia cómo opera el agente en automático. */
+const CAP_LIMS=[.03,.05,.1,.15,.2,.3,.5,1];
+function simCapR(s,P,i0,i1,cost,shorts,rL){
+  const {k,c,R,A,HI,LO,VA}=s,ef=s.E[P.emaF]||(s.E[P.emaF]=ema(c,P.emaF)),es=s.E[P.emaS]||(s.E[P.emaS]=ema(c,P.emaS)),out=[];let p=null;
+  for(let i=Math.max(i0,60);i<i1;i++){
+    if(p){
+      const b=k[i];let x=null;p.bars++;
+      if(p.sh){const t=Math.max(p.tp,p.cap);if(b.h>=p.stop)x=p.stop;else if(b.l<=t)x=t;else if(b.l<p.low){p.low=b.l;if(p.low<=p.e-p.r)p.stop=Math.min(p.stop,p.low+P.trailATR*p.atr);}}
+      else{const t=Math.min(p.tp,p.cap);if(b.l<=p.stop)x=p.stop;else if(b.h>=t)x=t;else if(b.h>p.high){p.high=b.h;if(p.high>=p.e+p.r)p.stop=Math.max(p.stop,p.high-P.trailATR*p.atr);}}
+      if(x===null&&(p.bars>=P.maxHold||(p.sh?ef[i]>es[i]:ef[i]<es[i])||(p.bars>=16&&(p.sh?p.e-b.c:b.c-p.e)/p.r<.25)))x=b.c;
+      if(x!==null){out.push({r:(p.sh?p.e-x:x-p.e)/p.e-cost,bars:p.bars});p=null;}
+      continue;
+    }
+    if(i+1>=i1)break;
+    const a=A[i],ap=a/c[i];if(!(ap>=.002&&ap<=.06)||P.tpATR*ap<.006)continue;
+    const r=R[i],vol=k[i].v>1.3*VA[i];let sh=null;
+    if(ef[i]>es[i]&&c[i]>es[i]&&r>=P.rsiMin&&r<=P.rsiMax&&40+(es[i]>es[i-3]?10:0)+(r>=50&&r<=65?5:0)+(c[i]>HI[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=false;
+    else if(shorts&&ef[i]<es[i]&&c[i]<es[i]&&r<=100-P.rsiMin&&r>=100-P.rsiMax&&40+(es[i]<es[i-3]?10:0)+(r<=50&&r>=35?5:0)+(c[i]<LO[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=true;
+    if(sh===null)continue;
+    const e=k[i+1].o,sd=P.stopATR*a;
+    p={sh,e,r:sd,atr:a,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*a:e+P.tpATR*a,cap:isFinite(rL)?(sh?e*(1-rL-cost):e*(1+rL+cost)):(sh?-Infinity:Infinity),high:e,low:e,bars:0};
+  }
+  return out;
+}
+function capStudy(force){
+  const now=Date.now(),cs=S.capStudy;if(!force&&cs&&now-cs.at<3600e3)return cs&&'reciente';
+  const a=S.agents[0];if(!a||a.status!=='alive')return null;
+  const P=a.params,ser=[];for(const tf of tfs())for(const k of uni()){const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k),ms:TF_MS[tf]});}
+  if(ser.length<8)return 'aún no hay velas suficientes';
+  const cl=S.agents.flatMap(x=>x.closed).slice(0,40),notional=cl.length?cl.reduce((t,x)=>t+x.qty*x.entry,0)/cl.length:Math.max(MIN_NOTIONAL,eq(a)*P.maxPosPct);
+  const run=rL=>{let n=0,w=0,sum=0,min=0;for(const x of ser)simCapR(x.s,P,60,x.s.k.length,x.cost,S.settings.shorts,rL).forEach(o=>{n++;sum+=o.r;if(o.r>0)w++;min+=o.bars*x.ms/60000;});
+    return {n,usd:sum*notional,hit:n?w/n:0,min:n?min/n:0};};
+  const plan=run(Infinity),rows=CAP_LIMS.map(l=>Object.assign({lim:l},run(l/notional)));
+  const best=rows.filter(r=>r.n>=10).sort((x,y)=>y.usd-x.usd)[0]||null;
+  S.capStudy={at:now,notional,series:ser.length,plan,rows,best:best&&best.usd>plan.usd?best.lim:null};
+  return 'hecho';
+}
+function capReport(){
+  const cs=S.capStudy;if(!cs)return '\nVARIANTES DEL LÍMITE: aún sin estudio (necesita velas suficientes)';
+  const f=r=>`${r.n} ops · ${sgn(r.usd)} · ${Math.round(r.hit*100)}% aciertos · ${Math.round(r.min)} min de media`;
+  return '\nVARIANTES DEL LÍMITE (simuladas con velas reales, posición media '+money(cs.notional)+', '+cs.series+' series, '+new Date(cs.at).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+')\n'+
+    '  plan del agente (sin límite): '+f(cs.plan)+'\n'+cs.rows.map(r=>`  límite ${money(r.lim)}: ${f(r)}${cs.best===r.lim?'  ← mejor':''}`).join('\n')+
+    '\n  En real con tu límite: '+([...new Set(((S.lab||{}).list||[]).filter(e=>e.kind==='limit').map(e=>e.limit))].sort((a,b)=>a-b).map(v=>{const x=labSum('limit',v);return `${money(v)} → ${x.n} ventas ${sgn(x.pnl)}${x.done?' (plan '+sgn(x.plan)+' en '+x.done+')':''}`;}).join(' · ')||'aún nada');
+}
 function renderQuotes(){
   if(!$('quotesBox').open)return;
   const order=['Acciones','Índices','Materias primas','Divisas','TradFi','Cripto','Otros'];

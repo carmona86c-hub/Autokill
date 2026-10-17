@@ -10,6 +10,7 @@ function reportErr(e){
 }
 async function tick(manual){
   if(busy)return;busy=true;
+  if(REM.on){try{await pullRemote();}catch(e){}finally{busy=false;render();schedule();}return;}
   try{
     const now=Date.now(),act=S.running&&alive().length>0;
     if(act&&now-S.lastSeen>120000)L(null,'pause',`Pausa de ${Math.round((now-S.lastSeen)/60000)} min (app cerrada o en segundo plano): no se operó. Todo lo aprendido y las posiciones siguen guardados; ahora se revisan con el precio actual.`);
@@ -46,7 +47,7 @@ async function tick(manual){
 function schedule(){
   clearTimeout(timer);
   const open=S.agents.some(a=>a.positions.length),act=S.running&&alive().length>0;
-  timer=setTimeout(()=>tick(false),open?5000:market.err?10000:act?15000:30000);
+  timer=setTimeout(()=>tick(false),REM.on?(document.visibilityState==='hidden'?60000:15000):open?5000:market.err?10000:act?15000:30000);
 }
 
 /* ---------- pantalla encendida ---------- */
@@ -71,7 +72,7 @@ function updateHero(){
   const le=$('tLoss');le.textContent=money(Math.abs(pl));le.className=pl>=0?'up':'down';
   const root=S.agents[0],t=$('cTier');t.textContent=root.status==='dead'?'apagado':root.tier.replace('_',' ');t.className='chip '+root.tier;
   const c=$('cConn'),on=S.running&&alive().length>0,fresh=Object.values(market.src).some(x=>x.ok&&Date.now()-x.at<90000);
-  c.className='chip '+(on&&fresh?'live':'off');c.textContent=!alive().length?'todos apagados':!S.running?'en pausa':fresh?'mercado real':market.err?'sin conexión':'conectando';
+  c.className='chip '+(on&&fresh?'live':'off');c.textContent=(REM.on?(remErr?'servidor sin respuesta':'servidor 24/7 · '):'')+(REM.on&&remErr?'':!alive().length?'todos apagados':!S.running?'en pausa':fresh?'mercado real':market.err?'sin conexión':'conectando');
   $('runBtn').textContent=S.running?'Pausar agente':'Reanudar agente';$('runBtn').disabled=!alive().length;
   $('scanBtn').disabled=!on;
 }
@@ -137,6 +138,7 @@ function renderLog(){
   $('logList').innerHTML=S.log.length?S.log.slice(0,150).map(e=>`<div class="log"><time>${clock(e.t)} · ${esc(e.a)}</time><span class="tag ${e.type}">${TAGS[e.type]||e.type}</span><span>${esc(e.msg)}</span></div>`).join(''):'<div class="empty">Aún no hay decisiones.</div>';
 }
 function stats(a){
+  if(a._st)return Object.assign({},a._st,{ret:ret(a),pnl:total(a)-a.initial}); /* en modo servidor llegan ya calculadas con todo el historial */
   const c=a.closed,w=c.filter(x=>x.pnl>0),l=c.filter(x=>x.pnl<=0);
   const gw=w.reduce((t,x)=>t+x.pnl,0),gl=-l.reduce((t,x)=>t+x.pnl,0);
   return {n:c.length,hit:c.length?w.length/c.length:0,aw:w.length?gw/w.length:0,al:l.length?gl/l.length:0,pf:gl>0?gw/gl:(gw>0?Infinity:0),

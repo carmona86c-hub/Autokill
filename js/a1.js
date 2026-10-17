@@ -237,8 +237,14 @@ function readLS(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(
 function idb(){return new Promise((res,rej)=>{try{const q=indexedDB.open('automaton',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}catch(e){rej(e);}});}
 async function idbPut(v){try{const d=await idb();d.transaction('kv','readwrite').objectStore('kv').put(v,LS);}catch(e){}}
 async function idbGet(){try{const d=await idb();return await new Promise(r=>{const q=d.transaction('kv').objectStore('kv').get(LS);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null);});}catch(e){return null;}}
+/* modo servidor: este dispositivo solo muestra y controla el agente que funciona 24/7 en el servidor */
+const IS_SERVER=!!globalThis.__SERVER__;
+const REMK='automaton.remote';
+const REM=(()=>{try{return Object.assign({url:'',key:'',on:false},JSON.parse(localStorage.getItem(REMK)||'{}'));}catch(e){return {url:'',key:'',on:false};}})();
+const remSave=()=>{try{localStorage.setItem(REMK,JSON.stringify(REM));}catch(e){}};
 let saveT=0;
 function save(force){
+  if(REM.on)return; /* lo que se ve es del servidor: no se guarda encima del agente de este dispositivo */
   const n=Date.now();if(!force&&n-saveT<4000)return;saveT=n;
   let j;try{j=JSON.stringify(S);}catch(e){return;}
   try{localStorage.setItem(LS,j);}catch(e){}

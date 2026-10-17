@@ -119,6 +119,9 @@ async function main() {
     } catch (e) { log(e); }
   }, 3000);
   setInterval(() => { run('save(true)'); saveRemote(false); }, SAVE_MS);
+  /* Render apaga el plan gratuito tras 15 min sin visitas: el propio agente se visita por su dirección pública cada 9 min */
+  const SELF = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
+  if (SELF) { const ping = () => fetch(SELF.replace(/\/+$/, '') + '/agent/health').catch(e => log('Autovisita fallida:', e.message)); setTimeout(ping, 60e3); setInterval(ping, 9 * 60e3); }
   http.createServer(handle).listen(PORT, '127.0.0.1', () => log('Agente escuchando en ' + PORT));
   const bye = async () => { try { run('save(true)'); await saveRemote(true); } catch (e) { } process.exit(0); };
   process.on('SIGTERM', bye); process.on('SIGINT', bye);

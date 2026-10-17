@@ -67,7 +67,9 @@ function krEntry(k,tf){const c=KR.cache[krKey(k,tf)];return c&&c.t===lastT(k,tf)
 const krOf=(k,tf)=>{const c=krEntry(k,tf);return c?c.r:null;};
 const costOf=k=>2*feeOf(k)+2*S.settings.slip;
 async function krFetch(list){
-  if(KR.busy||!list.length)return;KR.busy=true;
+  if(KR.busy||!list.length)return;
+  if(KR.loading&&Date.now()-KR.at<30000)return; /* el modelo se está cargando tras un reinicio: se reintenta cada 30 s */
+  KR.busy=true;
   list.forEach(({k,tf})=>KR.tried[krKey(k,tf)]=lastT(k,tf)); /* una consulta por activo y vela, aunque falle */
   try{
     const series=list.filter(({k,tf})=>(kOf(tf,k)||[]).length>=60).slice(0,8)
@@ -79,8 +81,11 @@ async function krFetch(list){
     finally{clearTimeout(to);}
     for(const id in j.results){const i=id.lastIndexOf('|'),k=id.slice(0,i),tf=id.slice(i+1);KR.cache[id]={t:lastT(k,tf),r:j.results[id],at:Date.now()};}
     const ks=Object.keys(KR.cache);if(ks.length>400)ks.forEach(x=>{if(Date.now()-KR.cache[x].at>2*3600e3)delete KR.cache[x];});
-    Object.assign(KR,{ok:true,at:Date.now(),ms:Math.round(performance.now()-t0),err:null,model:j.model||'',fake:!!j.fake});KR.asked+=series.length;
-  }catch(e){KR.ok=false;KR.at=Date.now();KR.err=e&&e.name==='AbortError'?'no responde a tiempo':(e&&e.name==='TypeError')?'no se puede conectar':(e&&e.message)||'sin conexión';}
+    Object.assign(KR,{ok:true,loading:false,at:Date.now(),ms:Math.round(performance.now()-t0),err:null,model:j.model||'',fake:!!j.fake});KR.asked+=series.length;
+  }catch(e){
+    /* 503 = Kronos está arrancando: no es un fallo, se espera a que esté listo en vez de operar sin su confirmación */
+    if(/HTTP 503|modelo cargando/.test((e&&e.message)||'')){KR.loading=true;KR.ok=false;KR.err=null;KR.at=Date.now();list.forEach(({k,tf})=>{delete KR.tried[krKey(k,tf)];});return;}
+    KR.loading=false;KR.ok=false;KR.at=Date.now();KR.err=e&&e.name==='AbortError'?'no responde a tiempo':(e&&e.name==='TypeError')?'no se puede conectar':(e&&e.message)||'sin conexión';}
   finally{KR.busy=false;}
   /* reevaluar con las previsiones recibidas */
   const again=()=>{if(busy)setTimeout(again,1000);else tick(true);};again();

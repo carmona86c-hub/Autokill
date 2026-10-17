@@ -195,6 +195,8 @@ async function pollPrices(){
   }
   await Promise.all(jobs);
   market.err=Object.values(market.src).some(x=>x.ok&&Date.now()-x.at<90000)?null:'ninguna fuente responde';
+  /* una fuente que se quedó fuera (por ejemplo, tras un "demasiadas peticiones") se vuelve a cargar en cuanto termina su descanso, sin esperar 30 min */
+  if(['BN','BF','HL'].some(x=>S.settings.markets[x]&&!market.lists[x].length&&!cooling(x))&&Date.now()-market.uniAt>120000)market.uniAt=0;
 }
 async function fetchKlines(tf){
   const now=Date.now(),ms=TF_MS[tf];market.k[tf]=market.k[tf]||{};market.kAt=market.kAt||{};market.kAt[tf]=Math.floor(now/ms);

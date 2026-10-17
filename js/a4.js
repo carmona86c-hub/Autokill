@@ -75,7 +75,29 @@ function updateHero(){
   c.className='chip '+(on&&fresh?'live':'off');c.textContent=(REM.on?(remErr?'servidor sin respuesta':'servidor 24/7 · '):'')+(REM.on&&remErr?'':!alive().length?'todos apagados':!S.running?'en pausa':fresh?'mercado real':market.err?'sin conexión':'conectando');
   $('runBtn').textContent=S.running?'Pausar agente':'Reanudar agente';$('runBtn').disabled=!alive().length;
   $('scanBtn').disabled=!on;
+  renderDrop();
 }
+/* desplegable de «Posiciones»: qué tiene, cuánto ha metido, dónde y a qué precio entró y cómo va ese mercado ahora */
+let dropOpen=false;
+function renderDrop(){
+  const box=$('posDrop');box.hidden=!dropOpen;$('tPos').setAttribute('aria-expanded',String(dropOpen));if(!dropOpen)return;
+  const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));
+  if(!items.length){box.innerHTML='<div class="empty">No hay posiciones abiertas ahora mismo.</div>';return;}
+  const vNow=p=>Math.max(0,posVal(p,market.price[p.sym]||p.entry)),inv=items.reduce((t,[,p])=>t+p.basis,0),val=items.reduce((t,[,p])=>t+vNow(p),0);
+  const dt=t=>new Date(t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),qn=q=>q>=100?q.toFixed(0):q>=1?q.toFixed(3):q.toPrecision(3);
+  box.innerHTML=`<div class="dsum"><span>${items.length} abierta${items.length>1?'s':''} · invertido ${money(inv)}</span><span class="${val-inv>=0?'up':'down'}">vale ${money(val)} (${sgn(val-inv)})</span></div>`+
+    items.sort((x,y)=>y[1].basis-x[1].basis).map(([a,p])=>{
+      const price=market.price[p.sym]||p.entry,v=vNow(p),pnl=v-p.basis,m=metaOf(p.sym)||{},d24=m.o24>0?price/m.o24-1:null;
+      const cls=sessOf(p.sym),open=sessOpen(cls,Date.now()),mc=open?minsToClose(cls):0;
+      const ses=open?(isFinite(mc)?'abierto · cierra en '+(mc>=60?Math.floor(mc/60)+' h '+(mc%60)+' min':mc+' min'):'abierto 24 h'):'cerrado';
+      return `<div class="dp"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pnl/p.basis)}</span></div>
+      <div class="dkv"><span>Invertido</span><b>${money(p.basis)}</b><span>Vale ahora</span><b class="${pnl>=0?'up':'down'}">${money(v)}</b>
+      <span>${isShort(p)?'Vendido en corto':'Comprado'}</span><b>${qn(p.qty)} a ${px(p.entry)}</b><span>Cuándo</span><b>${dt(p.openedAt)}</b>
+      <span>Dónde</span><b>${SRCNAME[srcOf(p.sym)]||'—'}</b><span>Precio ahora</span><b>${px(price)}</b>
+      <span>Últimas 24 h</span><b class="${d24==null?'':d24>=0?'up':'down'}">${d24==null?'—':pct(d24)}</b><span>Mercado</span><b class="${open?'up':'down'}">${ses}</b>
+      <span>Stop</span><b>${px(p.stop)}</b><span>Objetivo</span><b>${px(p.tp)}</b></div></div>`;}).join('');
+}
+$('tPos').addEventListener('click',()=>{dropOpen=!dropOpen;renderDrop();});
 function renderPanel(){
   const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));
   $('posList').innerHTML=items.length?items.map(([a,p])=>{

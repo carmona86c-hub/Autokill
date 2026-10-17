@@ -96,20 +96,29 @@ function renderDrop(){
       <span>${isShort(p)?'Vendido en corto':'Comprado'}</span><b>${qn(p.qty)} a ${px(p.entry)}</b><span>Cuándo</span><b>${dt(p.openedAt)}</b>
       <span>Dónde</span><b>${SRCNAME[srcOf(p.sym)]||'—'}</b><span>Precio ahora</span><b>${px(price)}</b>
       <span>Últimas 24 h</span><b class="${d24==null?'':d24>=0?'up':'down'}">${d24==null?'—':pct(d24)}</b><span>Mercado</span><b class="${open?'up':'down'}">${ses}</b>
-      <span>Stop</span><b>${px(p.stop)}</b><span>Objetivo</span><b>${px(p.tp)}</b></div></div>`;}).join('');
+      <span>Stop</span><b>${px(p.stop)}</b><span>Objetivo</span><b>${px(p.tp)}${p.capNet>0?' (límite '+money(p.capNet)+')':''}</b>
+      <span>Neto si vende ya</span><b class="${netIfClose(p,price)>=0?'up':'down'}">${sgn(netIfClose(p,price))}</b></div></div>`;}).join('');
 }
 $('tPos').addEventListener('click',()=>{dropOpen=!dropOpen;renderDrop();});
 function renderPanel(){
   const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));
-  $('posList').innerHTML=items.length?items.map(([a,p])=>{
+  const ae=document.activeElement,typing=ae&&ae.tagName==='INPUT'&&ae.closest&&ae.closest('#posList'); /* no se redibuja mientras escribes el límite */
+  if(!typing){$('posList').innerHTML=items.length?items.map(([a,p])=>{
+    const net=netIfClose(p,market.price[p.sym]||p.entry);
     const price=market.price[p.sym]||p.entry,dir=isShort(p)?-1:1,pnl=dir*(price-p.entry)*p.qty,pp=dir*(price-p.entry)/p.entry;
     const pos=Math.max(0,Math.min(1,(price-p.stop)/(p.tp-p.stop)))*100;
     return `<div class="pos"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pp)}</span></div>
       ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${esc(p.sym)}|${p.openedAt}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
-      <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div></div>`;}).join(''):
+      <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div>
+      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
+      ${(()=>{const key=esc(p.sym)+'|'+p.openedAt,open=capOpen.has(p.sym+'|'+p.openedAt)||p.capNet>0;
+        return `<button class="btn" type="button" data-tog="${key}" aria-expanded="${open}" style="padding:4px 10px;font-size:12px;justify-self:start">Límite de ganancia ${p.capNet>0?'· '+money(p.capNet):''} ${open?'▴':'▾'}</button>`+(open?`
+      <div class="row" style="gap:6px"><input type="number" step="0.01" min="0.01" inputmode="decimal" data-capin="${key}" value="${p.capNet>0?p.capNet:''}" placeholder="ganancia limpia en $ (ej. 1)" aria-label="Ganancia limpia a la que vender ${esc(base(p.sym))}, en dólares" style="flex:1 1 140px;padding:6px 8px;font:13px var(--mono)">
+        <button class="btn" type="button" data-cap="${key}" style="padding:6px 10px">Fijar</button>${p.capNet>0?`<button class="btn" type="button" data-nocap="${key}" style="padding:6px 10px">Quitar</button>`:''}
+        <span class="note" style="flex-basis:100%">${p.capNet>0?`No se vende hasta ganar ${money(p.capNet)} limpios (precio ${px(p.tp)}). Solo la cierran antes el stop (${px(p.stop)}) o el cierre del mercado.`:'Escribe cuánto quieres ganar limpio (tras comisiones) y pulsa Fijar. Si no pones nada, sigue el plan normal del agente.'}</span></div>`:'');})()}</div>`;}).join(''):
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
-  document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const [sym,t]=cv.dataset.k.split('|');const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);if(it)drawPos(cv,it[1]);});
+  document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const [sym,t]=cv.dataset.k.split('|');const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);if(it)drawPos(cv,it[1]);});}
   renderMarkets();renderQuotes();
   const mp=S.agents[0].params.minScore;
   $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
@@ -148,6 +157,21 @@ function drawPos(cv,p){
   const tfm=t=>new Date(t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
   g.fillStyle=mu;g.textAlign='left';g.fillText(tfm(t0),0,h-6);g.textAlign='right';g.fillText(tfm(t1)+' · velas '+(p.tf||S.settings.tf),W,h-6);
 }
+/* límite de ganancia de cada posición: pestaña, Fijar y Quitar */
+const capOpen=new Set();
+$('posList').addEventListener('click',async e=>{
+  const tg=e.target.closest&&e.target.closest('button[data-tog]');
+  if(tg){const k=tg.dataset.tog.replace(/&amp;/g,'&');capOpen.has(k)?capOpen.delete(k):capOpen.add(k);render();return;}
+  const b=e.target.closest&&e.target.closest('button[data-cap],button[data-nocap]');if(!b)return;
+  const key=b.dataset.cap||b.dataset.nocap,i=key.lastIndexOf('|'),sym=key.slice(0,i),t=key.slice(i+1);
+  const inp=[...document.querySelectorAll('#posList input[data-capin]')].find(x=>x.dataset.capin===key);
+  const net=b.dataset.cap?parseFloat(String(inp&&inp.value||'').replace(',','.')):null;
+  if(b.dataset.cap&&!(net>0)){if(inp){inp.focus();inp.placeholder='escribe cuántos $ limpios';}return;}
+  if(b.dataset.nocap)capOpen.delete(key);
+  b.disabled=true;const r=await act('poscap',{sym,t,net});b.disabled=false;
+  if(document.activeElement)document.activeElement.blur();render();
+  if(!r.ok)alert(r.msg);
+});
 function renderQuotes(){
   if(!$('quotesBox').open)return;
   const order=['Acciones','Índices','Materias primas','Divisas','TradFi','Cripto','Otros'];

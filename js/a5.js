@@ -75,7 +75,7 @@ function exportView(){
   st.log=st.log.slice(0,150);
   st.agents.forEach((a,i)=>{const o=S.agents[i];a._st=stats(o);a.closed=a.closed.slice(0,40);if(a.hist.length>300){const k=Math.ceil(a.hist.length/300);a.hist=a.hist.filter((_,j)=>j%k===0||j===a.hist.length-1);}});
   const keys=new Set([...market.universe,...S.agents.flatMap(a=>a.positions.map(p=>p.sym))]),pick=o=>{const r={};keys.forEach(k=>{if(o[k]!==undefined)r[k]=o[k];});return r;};
-  return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),universe:market.universe,lists:market.lists,src:market.src,err:market.err},
+  return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),universe:market.universe,lists:market.lists,src:market.src,err:market.err,ws:{BN:wsLive('BN'),BF:wsLive('BF'),HL:wsLive('HL')}},
     ui:{radar:ui.radar,summary:ui.summary,reasons:ui.reasons,scanAt:ui.scanAt},KR:{ok:KR.ok,err:KR.err,model:KR.model,ms:KR.ms,at:KR.at,fake:KR.fake,busy:KR.busy,asked:KR.asked}};
 }
 let remErr=null,remAt=0;
@@ -84,7 +84,7 @@ async function pullRemote(){
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
     S=j.S;const now=Date.now();
     market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;
-    Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.err=j.market.err;
+    Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.err=j.market.err;market.wsv=j.market.ws||{};
     market.src={};for(const k in j.market.src||{})market.src[k]=Object.assign({},j.market.src[k],{at:j.market.src[k].at?now-(j.at-j.market.src[k].at):0});
     Object.assign(ui,j.ui||{});Object.assign(KR,j.KR||{});if(KR.at)KR.at=now-(j.at-KR.at);
     remErr=null;remAt=now;

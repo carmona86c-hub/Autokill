@@ -8,7 +8,7 @@ function migrate(s){
   /* versión «máximas operaciones simultáneas»: hasta 12 posiciones de ~8 % cada una y 40 criptos vigiladas (una sola vez) */
   if(!s.settings.maxOpenV){s.settings.maxOpenV=1;s.settings.universe=Math.max(s.settings.universe||20,40);
     (s.agents||[]).forEach(a=>{if(a.params){a.params.maxPos=Math.max(a.params.maxPos||4,12);a.params.maxPosPct=Math.min(a.params.maxPosPct||.25,.08);}});}
-  s.agents=s.agents.map(a=>{const n=newAgent(a);if(!a.life)n.life=a.status==='dead'?'dead':'alive';if(!a.constitution){n.constitution=CONSTITUTION;n.constHash=CONST_HASH;}if(!a.spec)n.spec='Todo';return n;});
+  s.agents=s.agents.map(a=>{const n=newAgent(a);n.params=Object.assign({},DEF_PARAMS,a.params||{});if(!a.life)n.life=a.status==='dead'?'dead':'alive';if(!a.constitution){n.constitution=CONSTITUTION;n.constHash=CONST_HASH;}if(!a.spec)n.spec='Todo';return n;});
   const fx=k=>k.includes(':')?k:'BN:'+k;
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
   const ex={};for(const k in s.exp)ex[fx(k)]=s.exp[k];s.exp=ex;
@@ -142,8 +142,8 @@ function analyze(sym,P,tf){
   const lo=Math.min(...win.map(x=>x.l));
   const trend=ef[n]>es[n]&&c[n]>es[n],slope=es[n]>es[n-3],brk=c[n]>hi,vol=k[n].v>1.3*vavg;
   const dtrend=ef[n]<es[n]&&c[n]<es[n],dslope=es[n]<es[n-3],dbrk=c[n]<lo;
-  let score=0;if(trend)score+=30;if(slope)score+=10;if(r>=P.rsiMin&&r<=P.rsiMax)score+=20;if(r>=50&&r<=65)score+=5;if(brk)score+=25;if(vol)score+=10;
-  let sScore=0;if(dtrend)sScore+=30;if(dslope)sScore+=10;if(r<=100-P.rsiMin&&r>=100-P.rsiMax)sScore+=20;if(r<=50&&r>=35)sScore+=5;if(dbrk)sScore+=25;if(vol)sScore+=10;
+  let score=0;if(trend)score+=30;if(slope)score+=10;if(r>=P.rsiMin&&r<=P.rsiMax)score+=20;if(r>=50&&r<=65)score+=5;if(brk)score+=P.wBrk??25;if(vol)score+=P.wVol??10;
+  let sScore=0;if(dtrend)sScore+=30;if(dslope)sScore+=10;if(r<=100-P.rsiMin&&r>=100-P.rsiMax)sScore+=20;if(r<=50&&r>=35)sScore+=5;if(dbrk)sScore+=P.wBrk??25;if(vol)sScore+=P.wVol??10;
   const b={sym,tf,price,last:c[n],rsi:r,atr:a,atrPct:a/price,bearCross:ef[n]<es[n],bullCross:ef[n]>es[n]};
   return Object.assign(b,{side:'long',score,trend,short:Object.assign({},b,{side:'short',score:sScore,trend:dtrend})});
 }
@@ -235,7 +235,8 @@ function decide(a,an,P,T,pre){
   if(sh&&an.rsi<100-P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrevendido`;
   if(sh&&an.rsi>100-P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin presión vendedora`;
   const x=xp(an.sym);if(x.veto)return `experiencia negativa con ${base(an.sym)} (${x.e.w} de ${x.e.n} aciertos, ${sgn(x.e.pnl)})`;
-  if(an.score+x.adj<P.minScore)return `puntuación ${an.score}${x.adj?(x.adj>0?'+':'')+x.adj+' por experiencia':''} < ${P.minScore}`;
+  const ed=edgeAdj(an);
+  if(an.score+x.adj+ed.adj<P.minScore)return `puntuación ${an.score}${x.adj?(x.adj>0?'+':'')+x.adj+' por experiencia':''}${ed.adj?(ed.adj>0?'+':'')+ed.adj+' por resultados recientes ('+ed.why+')':''} < ${P.minScore}`;
   if(an.atrPct<.002)return 'volatilidad demasiado baja para cubrir comisiones';
   if(an.atrPct>.06)return 'volatilidad excesiva';
   if(P.tpATR*an.atrPct<.006)return 'objetivo no cubre los costes';

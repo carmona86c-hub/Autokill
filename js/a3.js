@@ -226,6 +226,8 @@ function maybeSpawn(a){
   spawnChild(a,null,fund,false);
 }
 function maybeEvolve(a){
+  for(const k in DEF_PARAMS)if(a.params[k]===undefined)a.params[k]=DEF_PARAMS[k];
+  checkRollback(a);selfImprove(a);
   if(a.status!=='alive'||a.parentId==null||a.life!=='alive')return;
   const par=agentById(a.parentId);if(!par||par.status!=='alive')return;
   if(a.closed.length<8||Date.now()-a.lastAdopt<24*3600e3)return;
@@ -246,3 +248,114 @@ function track(a){
   if(n-a.lastHist>=10000){a.lastHist=n;a.hist.push([n,v]);if(a.hist.length>1500)a.hist=a.hist.filter((_,i)=>i%2===0);}
 }
 
+
+/* parámetros nuevos que el agente puede ajustarse a sí mismo: cuánto pesan la ruptura y el volumen en la puntuación */
+Object.assign(DEF_PARAMS,{wBrk:25,wVol:10});Object.assign(BOUNDS,{wBrk:[0,40],wVol:[0,25]});Object.assign(PLABEL,{wBrk:'Peso de la ruptura',wVol:'Peso del volumen'});INTS.add('wBrk');INTS.add('wVol');
+/* ---------- automejora ----------
+   Cada 6 horas cada agente prueba decenas de variantes de sus propias reglas sobre las velas reales que ya tiene
+   descargadas. Elige la mejor con la parte antigua de las velas y solo la adopta si también gana en la parte reciente,
+   que no usó para elegir (así no se engaña a sí mismo). Después vigila en real: si con las reglas nuevas pierde más
+   que antes, vuelve a las anteriores. Además, ajusta la puntuación según cómo le van de verdad largos/cortos y cada mercado. */
+const OPT_KEYS=['emaF','emaS','rsiMin','rsiMax','stopATR','tpATR','trailATR','minScore','maxHold','wBrk','wVol'];
+const OPT_EVERY=6*3600e3;
+function serie(k){
+  const n=k.length,c=k.map(x=>x.c),R=new Array(n).fill(50),A=new Array(n).fill(0),HI=[],LO=[],VA=[];
+  let g=0,l=0;for(let i=1;i<=14;i++){const d=c[i]-c[i-1];d>=0?g+=d:l-=d;}g/=14;l/=14;R[14]=l===0?100:100-100/(1+g/l);
+  for(let i=15;i<n;i++){const d=c[i]-c[i-1];g=(g*13+Math.max(d,0))/14;l=(l*13+Math.max(-d,0))/14;R[i]=l===0?100:100-100/(1+g/l);}
+  const tr=i=>Math.max(k[i].h-k[i].l,Math.abs(k[i].h-k[i-1].c),Math.abs(k[i].l-k[i-1].c));
+  let a=0;for(let i=1;i<=14;i++)a+=tr(i);a/=14;A[14]=a;for(let i=15;i<n;i++){a=(a*13+tr(i))/14;A[i]=a;}
+  for(let i=20;i<n;i++){let h=-Infinity,lo=Infinity,v=0;for(let j=i-20;j<i;j++){if(k[j].h>h)h=k[j].h;if(k[j].l<lo)lo=k[j].l;v+=k[j].v;}HI[i]=h;LO[i]=lo;VA[i]=v/20;}
+  return {k,c,R,A,HI,LO,VA,E:{}};
+}
+/* simula las reglas P sobre una serie entre las velas i0 e i1: entra en la apertura de la vela siguiente a la señal,
+   paga comisiones y deslizamiento, y si en una misma vela se tocan stop y objetivo cuenta el stop (lo peor) */
+function simSerie(s,P,i0,i1,cost,shorts){
+  const {k,c,R,A,HI,LO,VA}=s,ef=s.E[P.emaF]||(s.E[P.emaF]=ema(c,P.emaF)),es=s.E[P.emaS]||(s.E[P.emaS]=ema(c,P.emaS)),out=[];let p=null;
+  for(let i=Math.max(i0,60);i<i1;i++){
+    if(p){
+      const b=k[i];let x=null;p.bars++;
+      if(p.sh){if(b.h>=p.stop)x=p.stop;else if(b.l<=p.tp)x=p.tp;else if(b.l<p.low){p.low=b.l;if(p.low<=p.e-p.r)p.stop=Math.min(p.stop,p.low+P.trailATR*p.atr);}}
+      else{if(b.l<=p.stop)x=p.stop;else if(b.h>=p.tp)x=p.tp;else if(b.h>p.high){p.high=b.h;if(p.high>=p.e+p.r)p.stop=Math.max(p.stop,p.high-P.trailATR*p.atr);}}
+      if(x===null&&(p.bars>=P.maxHold||(p.sh?ef[i]>es[i]:ef[i]<es[i])))x=b.c;
+      if(x!==null){out.push(p.sz*((p.sh?p.e-x:x-p.e)/p.e-cost));p=null;}
+      continue;
+    }
+    if(i+1>=i1)break;
+    const a=A[i],ap=a/c[i];if(!(ap>=.002&&ap<=.06)||P.tpATR*ap<.006)continue;
+    const r=R[i],vol=k[i].v>1.3*VA[i];let sh=null;
+    if(ef[i]>es[i]&&c[i]>es[i]&&r>=P.rsiMin&&r<=P.rsiMax&&40+(es[i]>es[i-3]?10:0)+(r>=50&&r<=65?5:0)+(c[i]>HI[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=false;
+    else if(shorts&&ef[i]<es[i]&&c[i]<es[i]&&r<=100-P.rsiMin&&r>=100-P.rsiMax&&40+(es[i]<es[i-3]?10:0)+(r<=50&&r>=35?5:0)+(c[i]<LO[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=true;
+    if(sh===null)continue;
+    const e=k[i+1].o,sd=P.stopATR*a;
+    p={sh,e,r:sd,atr:a,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*a:e+P.tpATR*a,high:e,low:e,bars:0,sz:Math.min(.25,.01*e/sd)};
+  }
+  return out;
+}
+function variant(P){
+  const Q={...P},ks=OPT_KEYS.slice().sort(()=>Math.random()-.5).slice(0,2+Math.floor(Math.random()*3));
+  ks.forEach(k=>{const[lo,hi]=BOUNDS[k];const v=Math.min(hi,Math.max(lo,Q[k]+(Math.random()*2-1)*(hi-lo)*.2));Q[k]=INTS.has(k)?Math.round(v):+v.toFixed(k==='rsiMin'||k==='rsiMax'?1:2);});
+  if(Q.emaF>=Q.emaS)Q.emaS=Math.min(BOUNDS.emaS[1],Q.emaF+4);
+  return Q;
+}
+const liveExp=(a,since)=>{const t=a.closed.filter(x=>!since||x.t1>since).slice(0,30);return {n:t.length,m:t.length?t.reduce((s,x)=>s+x.pct,0)/t.length:0};};
+const evoOf=a=>a.evo||(a.evo={ver:1,at:0,last:0,hist:[],prev:null,check:null});
+function selfImprove(a,force){
+  if(a.status!=='alive'||S.settings.selfOpt===false)return null;
+  const ev=evoOf(a);if(!force&&Date.now()-ev.last<OPT_EVERY)return null;
+  const ser=[];for(const tf of tfs())for(const k of uni()){if(!inSpec(a,k))continue;const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k)});}
+  if(ser.length<8)return 'aún no hay velas suficientes para probar variantes';
+  ev.last=Date.now();
+  const sh=S.settings.shorts,run=(P,part)=>{let sum=0,n=0,w=0;for(const x of ser){const sp=Math.floor(x.s.k.length*.65),r=part?simSerie(x.s,P,sp,x.s.k.length,x.cost,sh):simSerie(x.s,P,60,sp,x.cost,sh);r.forEach(v=>{sum+=v;n++;if(v>0)w++;});}return {sum,n,w,fit:sum-(n<6?(6-n)*.003:0)};};
+  const cur={...a.params},c0=run(cur,0),t0=run(cur,1);
+  let best=cur,bf=c0,tried=1;
+  const seeds=[{...cur,...Object.fromEntries(OPT_KEYS.map(k=>[k,DEF_PARAMS[k]]))},...S.agents.filter(x=>x!==a&&x.status==='alive').map(x=>({...cur,...Object.fromEntries(OPT_KEYS.map(k=>[k,x.params[k]]))}))];
+  for(const q of seeds){tried++;const f=run(q,0);if(f.fit>bf.fit){best=q;bf=f;}}
+  for(let round=0;round<3;round++){const base=best;for(let j=0;j<14;j++){tried++;const q=variant(base),f=run(q,0);if(f.fit>bf.fit){best=q;bf=f;}}}
+  const t1=best===cur?t0:run(best,1),margin=Math.max(.002,Math.abs(t0.sum)*.1);
+  ev.check={at:Date.now(),tried,series:ser.length,cur:t0.sum,best:t1.sum,n:t1.n};
+  const diff=OPT_KEYS.filter(k=>best[k]!==cur[k]);
+  if(!diff.length||t1.n<5||t1.fit<t0.fit+margin||bf.fit<=c0.fit){
+    L(a,'info',`Automejora: probó ${tried} variantes de sus reglas en ${ser.length} series de velas reales; ninguna gana de forma fiable en la prueba final (actuales ${pct(t0.sum)}), así que mantiene las suyas.`);
+    return 'sin cambios';
+  }
+  ev.prev={params:Object.fromEntries(OPT_KEYS.map(k=>[k,cur[k]])),base:liveExp(a)};ev.ver++;ev.at=Date.now();ev.judged=null;
+  OPT_KEYS.forEach(k=>{a.params[k]=best[k];});
+  const ch=diff.map(k=>`${PLABEL[k]} ${cur[k]}→${best[k]}`).join(', ');
+  ev.hist.unshift({at:Date.now(),ver:ev.ver,ch,before:t0.sum,after:t1.sum,n:t1.n,hit:t1.n?t1.w/t1.n:0});if(ev.hist.length>20)ev.hist.length=20;
+  L(a,'evolve',`Automejora v${ev.ver}: ${a.name} cambia sus reglas (${ch}). En velas reales recientes que no usó para elegir, el resultado simulado pasa de ${pct(t0.sum)} a ${pct(t1.sum)} (${t1.n} operaciones, ${Math.round(t1.w/t1.n*100)}% aciertos). Lo vigilará en real y si va peor vuelve atrás.`);
+  return 'adoptado';
+}
+/* juicio en real: tras 15 operaciones con las reglas nuevas, si pierde dinero y le va peor que antes, deshace el cambio */
+function checkRollback(a){
+  const ev=a.evo;if(!ev||!ev.prev||ev.judged===ev.ver)return;
+  const t=liveExp(a,ev.at);if(t.n<15)return;
+  ev.judged=ev.ver;const b=ev.prev.base;
+  if(t.m<0&&(b.n<10||t.m<b.m)){
+    OPT_KEYS.forEach(k=>{a.params[k]=ev.prev.params[k];});ev.ver++;ev.at=Date.now();ev.last=Date.now();
+    ev.hist.unshift({at:Date.now(),ver:ev.ver,rollback:true,live:t.m,n:t.n});if(ev.hist.length>20)ev.hist.length=20;ev.prev=null;
+    L(a,'evolve',`Automejora deshecha: con las reglas nuevas ${a.name} pierde en real (${t.n} operaciones, media ${pct(t.m)}${b.n>=10?` frente a ${pct(b.m)} antes`:''}). Vuelve a las reglas anteriores.`);
+  }else L(a,'evolve',`Automejora v${ev.ver} confirmada en real: ${t.n} operaciones, media ${pct(t.m)} por operación${b.n>=10?` (antes ${pct(b.m)})`:''}.`);
+}
+/* resultados reales recientes por dirección y por mercado: lo que le está saliendo mal puntúa menos, lo que sale bien un poco más */
+let edgeC={at:0,m:{}};
+function edgeAdj(an){
+  if(Date.now()-edgeC.at>60000){
+    const all=S.agents.flatMap(a=>a.closed.slice(0,200)).sort((x,y)=>y.t1-x.t1),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
+    for(const d of ['long','short'])m['s:'+d]=f(all.filter(x=>(x.side||'long')===d));
+    for(const c of new Set(all.map(x=>catOf(x.sym))))m['c:'+c]=f(all.filter(x=>catOf(x.sym)===c));
+    edgeC={at:Date.now(),m};
+  }
+  const d=an.side||'long',c=catOf(an.sym),s=edgeC.m['s:'+d]||0,k=edgeC.m['c:'+c]||0,why=[];
+  if(s)why.push((d==='short'?'cortos':'largos')+(s>0?' van bien':' van mal'));if(k)why.push(c+(k>0?' va bien':' va mal'));
+  return {adj:s+k,why:why.join(', ')};
+}
+function evoReport(){
+  const lines=[];
+  S.agents.filter(a=>a.status==='alive'||a.evo).forEach(a=>{const ev=a.evo;if(!ev)return;
+    const f=t=>new Date(t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    lines.push(`  ${a.name}: reglas v${ev.ver}${ev.check?` · última revisión ${f(ev.check.at)} (${ev.check.tried} variantes, ${ev.check.series} series)`:' · aún sin revisar'}`);
+    ev.hist.slice(0,6).forEach(h=>lines.push(h.rollback?`    ${f(h.at)} v${h.ver}: deshecha (en real ${pct(h.live)} por operación en ${h.n} ops)`:`    ${f(h.at)} v${h.ver}: ${h.ch} · prueba ${pct(h.before)} → ${pct(h.after)} (${h.n} ops)`));});
+  if(!lines.length)return '';
+  edgeC.at=0;const e=Object.entries(edgeAdj({sym:'',side:'long'})&&edgeC.m).filter(([,v])=>v).map(([k,v])=>`${k.slice(2).replace('long','largos').replace('short','cortos')} ${v>0?'+':''}${v}`).join(', ');
+  return '\nAUTOMEJORA\n'+lines.join('\n')+'\n  Ajuste por resultados recientes: '+(e||'ninguno (aún sin suficientes operaciones o resultados neutros)');
+}

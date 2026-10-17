@@ -57,7 +57,11 @@ function why(e){
   if(/HTTP/.test(m))return 'error del servidor ('+m.replace('HTTP ','')+')';
   return 'conexión bloqueada';
 }
-function fail(src,e){market.src[src]=Object.assign({},market.src[src],{ok:false,err:why(e)});}
+/* si una fuente dice "demasiadas peticiones" (429) o bloquea la IP (418), se la deja descansar antes de volver a pedir */
+function fail(src,e){const m=(e&&e.message)||'',cd=/HTTP 418/.test(m)?15*60e3:/HTTP 429/.test(m)?90e3:0,prev=market.src[src]||{};
+  market.src[src]=Object.assign({},prev,{ok:false,err:why(e),cool:cd?Date.now()+cd:prev.cool});}
+const cooling=s=>((market.src[s]||{}).cool||0)>Date.now();
+const BF_CAP=40; /* Binance Futuros ya tiene cientos de contratos TradFi: se vigilan los de más volumen para no pasar el límite de peticiones */
 async function pool(items,n,fn){const q=items.slice();await Promise.all(Array.from({length:Math.min(n,q.length)},async()=>{while(q.length){const it=q.shift();try{await fn(it);}catch(e){}}}));}
 
 async function uniBN(){
@@ -80,7 +84,7 @@ async function uniBF(){
     const sess={HK_EQUITY:'hk',KR_EQUITY:'krx',CN_EQUITY:'shanghai'}[ut];
     const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess};setPx(k,vol[x.symbol][1]);out.push(k);
   });
-  market.lists.BF=out;ok('BF');
+  market.lists.BF=out.sort((a,b)=>market.meta[b].vol-market.meta[a].vol).slice(0,BF_CAP);ok('BF');
 }
 async function uniHL(){
   const dexes=(await hl({type:'perpDexs'})||[]).filter(Boolean).map(d=>d.name).filter(Boolean);
@@ -104,11 +108,11 @@ async function uniHL(){
 }
 async function loadUniverse(){
   const m=S.settings.markets,jobs=[];
-  if(m.BN)jobs.push(uniBN().catch(e=>fail('BN',e)));else market.lists.BN=[];
+  if(m.BN){if(!cooling('BN'))jobs.push(uniBN().catch(e=>fail('BN',e)));}else market.lists.BN=[];
   await Promise.all(jobs);  /* HL usa la lista de cripto para no duplicarla */
   const j2=[];
-  if(m.BF)j2.push(uniBF().catch(e=>fail('BF',e)));else market.lists.BF=[];
-  if(m.HL)j2.push(uniHL().catch(e=>fail('HL',e)));else market.lists.HL=[];
+  if(m.BF){if(!cooling('BF'))j2.push(uniBF().catch(e=>fail('BF',e)));}else market.lists.BF=[];
+  if(m.HL){if(!cooling('HL'))j2.push(uniHL().catch(e=>fail('HL',e)));}else market.lists.HL=[];
   await Promise.all(j2);
   market.universe=[...market.lists.BN,...market.lists.BF,...market.lists.HL].sort((a,b)=>(market.meta[b].vol||0)-(market.meta[a].vol||0));
   market.uniAt=Date.now();
@@ -172,13 +176,13 @@ async function pollPrices(){
   const all=new Set([...market.universe,...need]),by={BN:[],BF:[],HL:[]};
   /* con su mercado cerrado no hace falta precio continuo, pero cada fuente se consulta al menos una vez por minuto para saber que sigue conectada */
   const stale=s=>!(market.src[s]&&market.src[s].ok&&Date.now()-market.src[s].at<60000);
-  all.forEach(k=>{const s=srcOf(k);if(by[s]&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
+  all.forEach(k=>{const s=srcOf(k);if(by[s]&&!cooling(s)&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
   const jobs=[];
   if(by.BN.length)jobs.push(jget('/api/v3/ticker/price?symbols='+encodeURIComponent(JSON.stringify(by.BN.map(idOf))))
     .catch(()=>jget('/api/v3/ticker/price'))
-    .then(j=>{j.forEach(x=>setPx('BN:'+x.symbol,+x.price));market.src.BN.at=Date.now();market.src.BN.ok=true;}).catch(e=>fail('BN',e)));
+    .then(j=>{j.forEach(x=>setPx('BN:'+x.symbol,+x.price));market.src.BN.at=Date.now();market.src.BN.ok=true;market.src.BN.err=null;}).catch(e=>fail('BN',e)));
   if(by.BF.length)jobs.push(fget(FAPI+'/fapi/v1/ticker/price')
-    .then(j=>{const w=new Set(by.BF);j.forEach(x=>{const k='BF:'+x.symbol;if(w.has(k))setPx(k,+x.price);});market.src.BF.at=Date.now();market.src.BF.ok=true;}).catch(e=>fail('BF',e)));
+    .then(j=>{const w=new Set(by.BF);j.forEach(x=>{const k='BF:'+x.symbol;if(w.has(k))setPx(k,+x.price);});market.src.BF.at=Date.now();market.src.BF.ok=true;market.src.BF.err=null;}).catch(e=>fail('BF',e)));
   if(by.HL.length){
     const dexes=new Set(by.HL.map(k=>idOf(k).split(':')[0])),hot=new Set([...need].filter(k=>srcOf(k)==='HL').map(k=>idOf(k).split(':')[0]));
     dexes.forEach(dex=>{
@@ -186,7 +190,7 @@ async function pollPrices(){
       jobs.push(hl({type:'allMids',dex}).then(async m=>{
         let hit=0;for(const c in m){if(!c.startsWith(dex+':'))continue;const k='HL:'+c;if(all.has(k)){setPx(k,+m[c]);hit++;}}
         if(!hit){const [meta,ctxs]=await hl({type:'metaAndAssetCtxs',dex});meta.universe.forEach((u,i)=>{const id=u.name.includes(':')?u.name:dex+':'+u.name,k='HL:'+id,c=ctxs[i]||{};if(all.has(k))setPx(k,+(c.midPx||c.markPx));});}
-        market.hlAt[dex]=Date.now();market.src.HL.at=Date.now();market.src.HL.ok=true;}).catch(e=>fail('HL',e)));
+        market.hlAt[dex]=Date.now();market.src.HL.at=Date.now();market.src.HL.ok=true;market.src.HL.err=null;}).catch(e=>fail('HL',e)));
     });
   }
   await Promise.all(jobs);
@@ -195,7 +199,7 @@ async function pollPrices(){
 async function fetchKlines(tf){
   const now=Date.now(),ms=TF_MS[tf];market.k[tf]=market.k[tf]||{};market.kAt=market.kAt||{};market.kAt[tf]=Math.floor(now/ms);
   const held=new Set();S.agents.forEach(a=>a.positions.forEach(p=>held.add(p.sym)));
-  const keys=[...new Set([...uni(),...held])].filter(k=>isOpen(k)||held.has(k));
+  const keys=[...new Set([...uni(),...held])].filter(k=>(isOpen(k)||held.has(k))&&!cooling(srcOf(k)));
   if(!market.raw)market.raw={};
   const toK=k=>k.map(r=>({t:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5],ct:r[6]}));
   const store=(k,arr)=>{
@@ -208,12 +212,14 @@ async function fetchKlines(tf){
   const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
-    pool(bin,10,async k=>{const id=idOf(k);let r;
+    pool(bin,6,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
       if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=120`);
-      else{const st=since(k);r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(st?`startTime=${st}&limit=1500`:'limit=1500'));}
+      /* peso bajo: 499 velas la primera vez, y luego solo las nuevas (hasta 99) */
+      else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit=499'));}
+      }catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail(srcOf(k),e);throw e;}
       store(k,toK(r));}),
-    pool(hls,4,async k=>{const st=since(k)||now-({'1m':2,'5m':4,'15m':8,'1h':20}[tf]||4)*864e5;
-      const r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});
+    pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':2,'5m':4,'15m':8,'1h':20}[tf]||4)*864e5;
+      let r;try{r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});}catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail('HL',e);throw e;}
       store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); })
   ]);
 }

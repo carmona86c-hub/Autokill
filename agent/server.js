@@ -51,6 +51,7 @@ const sandbox = {
     o = Object.assign({}, o || {}); delete o.mode; return fetch(u, o);  /* "no-cors" es cosa de navegadores */
   },
   AbortController, URLSearchParams, FormData, Blob, TextEncoder, TextDecoder, performance,
+  WebSocket: process.env.AGENT_MOCK ? undefined : globalThis.WebSocket,  /* conexión continua de precios (Node 22) */
   document: doc, navigator: { onLine: true }, location: { protocol: 'https:', href: 'https://servidor/' },
   localStorage: { getItem: k => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
   addEventListener() {}, getComputedStyle: () => ({ getPropertyValue: () => '' }), devicePixelRatio: 1,

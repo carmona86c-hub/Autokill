@@ -1,6 +1,9 @@
 # Servidor de Automaton (Render, plan gratuito: 512 MB): cerebro Kronos + agente 24/7
 FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git nodejs tzdata && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git tzdata && rm -rf /var/lib/apt/lists/*
+# Node 22: trae WebSocket de serie para recibir los precios en directo (el de Debian es el 18 y no lo tiene)
+RUN python -c "import urllib.request as u;u.urlretrieve('https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.gz','/tmp/n.tgz')" \
+ && tar -xzf /tmp/n.tgz -C /opt && ln -s /opt/node-v22.11.0-linux-x64/bin/node /usr/local/bin/node && rm /tmp/n.tgz && node -e "if(typeof WebSocket!=='function')process.exit(1)"
 RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir "numpy<2.3" pandas einops==0.8.1 huggingface_hub==0.33.1 safetensors tqdm starlette uvicorn
 RUN git clone --depth 1 https://github.com/shiyu-coder/Kronos /opt/kronos

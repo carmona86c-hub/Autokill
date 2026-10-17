@@ -62,12 +62,12 @@ try{if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serv
 /* ---------- interfaz ---------- */
 let tab='panel';
 function updateHero(){
-  const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a)+a.reserve,0),op=ags.reduce((t,a)=>t+eq(a),0);
-  const res=ags.reduce((t,a)=>t+a.reserve,0),pl=tot-S.initial;
+  const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a),0),op=ags.reduce((t,a)=>t+a.cash,0);
+  const npos=ags.reduce((t,a)=>t+a.positions.length,0),pl=tot-S.initial;
   $('hTotal').textContent=money(tot);
   const el=$('hPnl');el.className='pnl '+(pl>=0?'up':'down');
   el.textContent=`${pl>=0?'▲':'▼'} ${sgn(pl)} (${pct(pl/S.initial)}) sobre ${money(S.initial)}`;
-  $('tOp').textContent=money(op);$('tRes').textContent=money(res);
+  $('tOp').textContent=money(op);$('tRes').textContent=String(npos);
   $('tLossL').textContent=pl>=0?'Ganado':'Perdido';
   const le=$('tLoss');le.textContent=money(Math.abs(pl));le.className=pl>=0?'up':'down';
   const root=S.agents[0],t=$('cTier');t.textContent=root.status==='dead'?'apagado':root.tier.replace('_',' ');t.className='chip '+root.tier;
@@ -180,9 +180,9 @@ function syncSel(el,opts){const sig=opts.map(o=>o[0]+'|'+o[1]).join(';');if(el.d
 function renderLin(){
   $('cHash').textContent=CONST_HASH;if(!$('cText').textContent)$('cText').textContent=CONSTITUTION;
   if($('gSpec').options.length<2)$('gSpec').insertAdjacentHTML('beforeend',SPECS.map(x=>`<option>${x}</option>`).join(''));
-  syncSel($('gPar'),S.agents.filter(a=>a.status==='alive').map(a=>[a.id,`${a.name} · reserva ${money(a.reserve)}`]));
+  syncSel($('gPar'),S.agents.filter(a=>a.status==='alive').map(a=>[a.id,`${a.name} · efectivo ${money(a.cash)}`]));
   syncSel($('hKid'),S.agents.filter(a=>a.parentId!=null).map(a=>[a.id,`${a.name} (${LIFE_LAB[a.life]||a.life})`]));
-  {const par=agentById(+$('gPar').value);$('gInfo').textContent=par?(canSpawn(par)?'No puede replicarse: '+canSpawn(par)+'.':`Reserva de ${par.name}: ${money(par.reserve)} · financiación por defecto ${money(childFund(par))} · especialidad sugerida: ${pickSpec(par)}${S.settings.repl?' · replicación automática activada (cuando la reserva duplica la financiación, cada 6 h como mucho)':''}`):'';}
+  {const par=agentById(+$('gPar').value);$('gInfo').textContent=par?(canSpawn(par)?'No puede replicarse: '+canSpawn(par)+'.':`Efectivo libre de ${par.name}: ${money(par.cash)} · financiación por defecto ${money(childFund(par))} · especialidad sugerida: ${pickSpec(par)}${S.settings.repl?' · replicación automática activada (cuando lo que gana por encima de su capital dobla la financiación, cada 6 h como mucho)':''}`):'';}
   $('linList').innerHTML=S.agents.map(a=>{const s=stats(a),par=a.parentId!=null?agentById(a.parentId):null,kids=kidsOf(a);
     const life=a.status==='dead'?'dead':a.life||'alive',lc=life==='alive'?a.tier:life==='dead'?'dead':['unhealthy'].includes(life)?'critical':'low_compute';
     const ok=verifyConst(a);
@@ -190,7 +190,7 @@ function renderLin(){
     const ib=(a.inbox||[]).slice(0,3).map(m=>`<div>${clock(m.t)} · <b>${esc(m.from)}</b>: ${esc(m.text)}</div>`).join('');
     return `<div class="card agent"><div class="row" style="justify-content:space-between"><h3>${esc(a.name)}</h3><span class="row" style="gap:6px"><span class="chip ${lc}">${LIFE_LAB[life]}</span>${a.status==='alive'?`<span class="chip ${a.tier}">${a.tier.replace('_',' ')}</span>`:''}</span></div>
     <div class="note">Generación ${a.gen}${par?' · hijo de '+esc(par.name):' · agente original'} · nació ${clock(a.born)}${kids.length?` · ${kids.filter(k=>k.status!=='dead').length} hijo(s) vivo(s) de ${kids.length}`:''}</div>
-    <div class="meta"><span>Especialidad: ${esc(a.spec||'Todo')}</span><span>Capital: ${money(a.initial)}</span><span>Operativo: ${money(eq(a))}</span><span>Reserva: ${money(a.reserve)}</span>${par?`<span>Enviado al padre: ${money(a.swept)}</span>`:''}<span class="${s.ret>=0?'up':'down'}">Resultado: ${pct(s.ret)}</span><span>Operaciones: ${s.n}</span><span>Aciertos: ${s.n?(s.hit*100).toFixed(0)+'%':'—'}</span></div>
+    <div class="meta"><span>Especialidad: ${esc(a.spec||'Todo')}</span><span>Capital: ${money(a.initial)}</span><span>Operativo: ${money(eq(a))}</span>${par&&a.swept>0?`<span>Enviado al padre: ${money(a.swept)}</span>`:''}<span class="${s.ret>=0?'up':'down'}">Resultado: ${pct(s.ret)}</span><span>Operaciones: ${s.n}</span><span>Aciertos: ${s.n?(s.hit*100).toFixed(0)+'%':'—'}</span></div>
     <div class="note" style="margin-top:6px">Constitución: <span class="${ok?'up':'down'}">${ok?'verificada':'sin verificar'}</span>${a.health?` · Salud: ${esc(a.health.why)} (${clock(a.health.at)})`:''}${a.recTries?` · reinicios: ${a.recTries}`:''}</div>
     ${a.genesis&&a.genesis.msg?`<div class="note" style="margin-top:6px">Génesis: «${esc(a.genesis.msg)}»</div>`:''}
     <div class="note" style="margin-top:8px;font-family:var(--mono)">EMA ${a.params.emaF}/${a.params.emaS} · riesgo ${(a.params.riskPct*100).toFixed(2)}% · stop ${(+a.params.stopATR).toFixed(2)}×ATR · objetivo ${(+a.params.tpATR).toFixed(2)}×ATR · RSI ${Math.round(a.params.rsiMin)}–${Math.round(a.params.rsiMax)}</div>

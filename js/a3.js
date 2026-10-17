@@ -42,7 +42,7 @@ function agentScan(a,manual){
    Como en el original: el padre crea un hijo con su propia cartera, identidad y presión de supervivencia.
    Ciclo de vida: spawning → provisioning → configuring → starting → alive ⇄ unhealthy → recovering → dead.
    Génesis validada (nombre, especialidad, mensaje inicial), constitución inmutable verificada por huella,
-   chequeos de salud, mensajes padre-hijo con límites, financiación desde la reserva y retirada de hijos muertos.
+   chequeos de salud, mensajes padre-hijo con límites, financiación desde el capital del padre y retirada de hijos muertos.
    El padre puede financiar y aconsejar, pero no controla al hijo. */
 const CONSTITUTION=`Constitución de Automaton (inmutable)
 I. No causar daño: opera solo con el depósito ficticio asignado; jamás con dinero real sin autorización expresa de su creador.
@@ -84,7 +84,11 @@ function pickSpec(a){
   const avail=new Set(uni().map(catOf));
   return SPECS.slice(1).find(k=>avail.has(k)&&!taken.has(k))||'Todo';
 }
-const childFund=a=>Math.max(20,.15*a.initial);
+/* el dinero entre padre e hijo se mueve como capital: baja el capital del que da y sube el del que recibe */
+const seedOf=a=>a.parentId==null?S.initial:(a.seed||a.initial);
+const childFund=a=>Math.max(20,.15*seedOf(a));
+function moveOut(a,x){a.cash-=x;a.initial-=x;a.peak-=x;if(a.dayStart)a.dayStart-=x;}
+function moveIn(a,x){if(!(x>0))return;a.cash+=x;a.initial+=x;a.peak+=x;if(a.dayStart)a.dayStart+=x;}
 function canSpawn(a){
   if(a.status!=='alive'||!['alive',undefined].includes(a.life))return 'el padre no está sano';
   if(a.tier==='critical')return 'el padre está en nivel crítico';
@@ -96,7 +100,8 @@ function canSpawn(a){
 function spawnChild(a,g,fund,manual){
   const no=canSpawn(a);if(no)return no;
   fund=+fund||childFund(a);if(!(fund>=MIN_NOTIONAL*2))return `financiación mínima ${money(MIN_NOTIONAL*2)}`;
-  if(a.reserve<fund)return `reserva insuficiente (${money(a.reserve)} de ${money(fund)})`;
+  if(a.cash<fund)return `efectivo libre insuficiente (${money(a.cash)} de ${money(fund)})`;
+  if(eq(a)-fund<20)return 'el padre se quedaría con menos de $20';
   const id=S.nextId;
   g=Object.assign({name:`Automaton-${a.gen+1}.${id}`,spec:pickSpec(a),msg:`Hijo de ${a.name}. Especialízate y sobrevive: gana tu existencia respetando la constitución.`},g||{});
   g.name=String(g.name).trim();
@@ -105,9 +110,9 @@ function spawnChild(a,g,fund,manual){
   const c=newAgent({id,name:g.name,gen:a.gen+1,parentId:a.id,params:mutate(a.params),initial:0,cash:0,peak:0,status:'starting',life:null,events:[],inbox:[],spec:g.spec,genesis:{name:g.name,spec:g.spec,msg:g.msg,at:Date.now(),parent:a.name},constitution:null,constHash:null,lifeAt:Date.now()});
   lifeEvt(c,'spawning',`génesis validada · especialidad ${g.spec}`);
   S.agents.push(c);
-  a.reserve-=fund;c.initial=fund;c.cash=fund;c.peak=fund;c.hist=[[Date.now(),fund]];
+  moveOut(a,fund);c.initial=fund;c.seed=fund;c.cash=fund;c.peak=fund;c.hist=[[Date.now(),fund]];
   a.lastSpawn=Date.now();
-  L(a,'spawn',`Replicación${manual?' manual':''}: nace ${c.name} (${g.spec}) con ${money(fund)} de la reserva de ${a.name}, con parámetros mutados.`);
+  L(a,'spawn',`Replicación${manual?' manual':''}: nace ${c.name} (${g.spec}) con ${money(fund)} del capital de ${a.name}, con parámetros mutados.`);
   if(g.msg)sendMsg(a,c,g.msg,true);
   return null;
 }
@@ -133,15 +138,16 @@ function lifecycle(c){
 }
 function verifyConst(c){return typeof c.constitution==='string'&&c.constitution===CONSTITUTION&&huella(c.constitution)===CONST_HASH&&c.constHash===CONST_HASH;}
 /* devuelve al padre lo que quede si el hijo muere antes de operar */
-function refund(c){const par=agentById(c.parentId);if(!par||c.positions.length)return;const x=c.cash+c.reserve;if(x>0){c.cash=0;c.reserve=0;par.reserve+=x;}}
-/* fund_child: de la reserva del padre a la cartera del hijo (sube su capital, no es beneficio) */
+function refund(c){const par=agentById(c.parentId);if(!par||c.positions.length)return;const x=c.cash;if(x>0){c.cash=0;c.reserve=0;moveIn(par,x);}}
+/* fund_child: del capital del padre a la cartera del hijo (sube el capital del hijo, no es beneficio) */
 function fundChild(par,c,amt){
   amt=+amt;if(!(amt>0))return 'cantidad no válida';
   if(c.parentId!==par.id)return 'no es hijo suyo';
   if(c.status==='dead')return 'el hijo ya está muerto';
-  if(par.reserve<amt)return `reserva insuficiente (${money(par.reserve)})`;
-  par.reserve-=amt;c.cash+=amt;c.initial+=amt;c.peak=Math.max(c.peak,total(c));
-  L(par,'fund',`Financia a ${c.name} con ${money(amt)} de su reserva (capital del hijo: ${money(c.initial)}).`);
+  if(par.cash<amt)return `efectivo libre insuficiente (${money(par.cash)})`;
+  if(eq(par)-amt<20)return 'el padre se quedaría con menos de $20';
+  moveOut(par,amt);c.seed=(c.seed||c.initial)+amt;c.cash+=amt;c.initial+=amt;c.peak=Math.max(c.peak,total(c));
+  L(par,'fund',`Financia a ${c.name} con ${money(amt)} de su capital (capital del hijo: ${money(c.initial)}).`);
   (c.events=c.events||[]).unshift({t:Date.now(),from:c.life,to:c.life,why:`financiado con ${money(amt)}`});
   if(c.status==='alive')updateTier(c);
   return null;
@@ -169,7 +175,7 @@ function readInbox(c){
     else if(/informe|estado|c[oó]mo vas/.test(t)){if(par)sendMsg(c,par,childReport(c),true);}
   }
 }
-function childReport(c){const s=stats(c);return `Informe: ${LIFE_LAB[c.life]}, nivel ${c.tier}, operativo ${money(eq(c))}, resultado ${pct(s.ret)}, ${s.n} operaciones${s.n?', '+(s.hit*100).toFixed(0)+'% aciertos':''}, enviado al padre ${money(c.swept)}.`;}
+function childReport(c){const s=stats(c);return `Informe: ${LIFE_LAB[c.life]}, nivel ${c.tier}, operativo ${money(eq(c))}, resultado ${pct(s.ret)}, ${s.n} operaciones${s.n?', '+(s.hit*100).toFixed(0)+'% aciertos':''}${c.swept>0?', enviado al padre '+money(c.swept):''}.`;}
 /* check_child_status: salud del hijo (cada 5 min) */
 function healthOf(c){
   const why=[];
@@ -200,7 +206,7 @@ function checkChild(c){
   }
   if(par&&n-(c.lastReport||c.born)>=12*3600e3){c.lastReport=n;sendMsg(c,par,childReport(c),true);}
 }
-/* prune_dead_children: retira los hijos muertos; su dinero restante vuelve a la reserva del padre
+/* prune_dead_children: retira los hijos muertos; su dinero restante vuelve al capital del padre
    y su historial queda en el cementerio (la experiencia de mercado ya está en S.exp) */
 function pruneDead(manual){
   const dead=S.agents.filter(a=>a.parentId!=null&&a.status==='dead'&&!a.positions.length&&(manual||Date.now()-(a.diedAt||0)>=24*3600e3));
@@ -209,12 +215,12 @@ function pruneDead(manual){
   dead.forEach(d=>{
     let par=agentById(d.parentId);while(par&&par.status==='dead'&&par.parentId!=null&&dead.includes(par))par=agentById(par.parentId);
     par=par||S.agents[0];
-    const left=d.cash+d.reserve;par.reserve+=left;d.cash=0;d.reserve=0;
+    const left=d.cash+(d.reserve||0);moveIn(par,left);d.cash=0;d.reserve=0;
     kidsOf(d).forEach(k=>{k.parentId=par.id;});
     const s=stats(d);
     S.graveyard.unshift({id:d.id,name:d.name,gen:d.gen,parent:par.name,spec:d.spec,born:d.born,died:d.diedAt,initial:d.initial,trades:s.n,hit:s.hit,pnl:d.closed.reduce((t,c)=>t+c.pnl,0),ret:s.ret,swept:d.swept,returned:left,events:(d.events||[]).slice(0,10),why:(d.events||[])[0]?.why||''});
     S.agents.splice(S.agents.indexOf(d),1);
-    L(par,'life',`${d.name} retirado del linaje${left>0.005?`: ${money(left)} vuelven a la reserva de ${par.name}`:''}.`);
+    L(par,'life',`${d.name} retirado del linaje${left>0.005?`: ${money(left)} vuelven al capital de ${par.name}`:''}.`);
   });
   if(S.graveyard.length>50)S.graveyard.length=50;
   return dead.length;
@@ -222,7 +228,8 @@ function pruneDead(manual){
 function maybeSpawn(a){
   const s=S.settings;if(!s.repl||canSpawn(a))return;
   const fund=childFund(a);
-  if(a.reserve<fund*2||Date.now()-a.lastSpawn<6*3600e3)return;
+  /* solo con beneficio: lo que gana por encima de su capital de partida debe doblar lo que cuesta el hijo */
+  if(eq(a)-seedOf(a)<fund*2||a.cash<fund||Date.now()-a.lastSpawn<6*3600e3)return;
   spawnChild(a,null,fund,false);
 }
 function maybeEvolve(a){

@@ -30,7 +30,7 @@ function applyCmd(c,a){
     case 'capital':{const v=+a.v;if(!(v>=20))return no('Mínimo $20');
       /* reiniciar el saldo no borra lo aprendido: se conservan la experiencia por activo, los ajustes,
          los parámetros que ha ido afinando el agente original, el cementerio y un resumen de cada etapa anterior */
-      const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x),0);
+      const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x)+(x.vault||0),0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
       S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
       S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;
@@ -53,8 +53,8 @@ function applyCmd(c,a){
     case 'mode':{const v=a.cap==null||a.cap===''?null:Math.round(+a.cap*100)/100;
       if(v!=null&&!(v>=.01&&v<=1000))return no('Pon un límite entre 0,01 y 1000 $.');
       if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
-      S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan.');
-      S.agents.forEach(checkExits);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
+      S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Lo que gane por encima de su capital pasa a la cartera reservada (congelada). Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan. Lo ya reservado sigue congelado.');
+      S.agents.forEach(checkExits);S.agents.forEach(sweep);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}
     case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}

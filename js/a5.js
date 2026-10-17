@@ -2,7 +2,7 @@
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -15,6 +15,7 @@ function applySettings(o){
   if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
   if(isFinite(o.maxKids)&&o.maxKids>=0&&o.maxKids<=5)s.maxKids=o.maxKids;
   if('repl' in o)s.repl=!!o.repl;if('shorts' in o)s.shorts=!!o.shorts;
+  if('cryptoFut' in o&&!!o.cryptoFut!==(s.cryptoFut!==false)){s.cryptoFut=!!o.cryptoFut;market.uniAt=0;}
   if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
   if('device' in o)s.device=String(o.device||'').slice(0,60);
@@ -66,8 +67,16 @@ function applyCmd(c,a){
 }
 /* informe con las etapas anteriores (cada vez que se reinició el saldo) */
 function reportFull(){
-  const r=S.runs||[],ev=evoReport()+labReport()+capReport();if(!r.length)return report()+ev;
+  const r=S.runs||[],ev=healthReport()+evoReport()+labReport()+capReport();if(!r.length)return report()+ev;
   return report()+ev+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
+}
+/* salud del sistema: si gana de verdad y por qué (recorrido de las operaciones) */
+function healthReport(){
+  const a=S.agents[0],s=stats(a),c=a.closed.filter(x=>x.mfe!=null);if(!s.n)return '\nSALUD: aún sin operaciones cerradas';
+  const lo=c.filter(x=>x.pnl<=0),wi=c.filter(x=>x.pnl>0),avg=(xs,f)=>xs.length?xs.reduce((t,x)=>t+f(x),0)/xs.length:0;
+  return `\nSALUD DEL SISTEMA (${s.n} operaciones${s.n<100?', muestra aún pequeña: conclusiones poco fiables':''})\n`+
+    `  deja de media ${sgn(s.exp)} por operación · gana ${isFinite(s.payoff)?s.payoff.toFixed(2):'∞'} por cada 1 perdido · acierta ${Math.round(s.hit*100)}% y necesita ${Math.round(s.need*100)}%`+
+    (c.length?`\n  recorrido (${c.length} con datos): ganadoras llegaron de media a ${avg(wi,x=>x.mfe).toFixed(2)}R · perdedoras a ${avg(lo,x=>x.mfe).toFixed(2)}R a favor antes de perder · ${lo.filter(x=>x.mfe>=1).length} de ${lo.length} perdedoras llegaron a +1R · ${c.filter(x=>x.half).length} con mitad asegurada`:'');
 }
 /* tu registro en el informe: así se puede revisar con Claude si el límite o las ventas manuales compensan */
 function labReport(){
@@ -255,7 +264,7 @@ $('hPrune').addEventListener('click',async()=>{hOut((await act('prune')).msg);})
 function collectSettings(){
   const n=id=>parseFloat($(id).value),params={};for(const k in DEF_PARAMS)params[k]=$('p_'+k).value;
   return {fee:n('sFee')/100,slip:n('sSlip')/100,maxDay:n('sDay')/100,universe:Math.round(n('sUni')),maxKids:Math.round(n('sKids')),
-    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',
+    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',
     kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
     device:$('devName').value.trim(),tf:$('sTf').value,params};
 }

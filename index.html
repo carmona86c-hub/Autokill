@@ -27,10 +27,11 @@
   --bg:#0a0f14; --panel:#111a22; --line:#1f2d38; --fg:#e6edf2; --mute:#8a9eae;
   --money:#f2b441; --up:#3ccf91; --down:#ff6b6b; --info:#6aa8ff; --chip:#18242e; color-scheme:dark}
 *{box-sizing:border-box}
-html,body{height:100%}
-body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--ui);
+/* toda la página se desplaza de forma normal; solo las pestañas de abajo quedan fijas */
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:14px/1.45 var(--ui);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  display:flex;flex-direction:column;overflow:hidden}
+  overflow-x:hidden}
 button,input,select{font:inherit;color:inherit}
 header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;border-bottom:1px solid var(--line)}
 .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
@@ -68,8 +69,8 @@ header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;bo
 .dkv span{color:var(--mute)}.dkv b{font:500 12px var(--mono);min-width:0;overflow-wrap:anywhere}
 @media (max-width:420px){.dkv{grid-template-columns:auto 1fr}}
 .tile b{display:block;font:600 15px var(--mono);margin-top:2px;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-main{flex:1;min-height:0;overflow-y:auto;padding-block:14px 18px;-webkit-overflow-scrolling:touch}
-nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin:0 calc(-1*max(16px,env(safe-area-inset-left,0px)));padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px));padding-bottom:env(safe-area-inset-bottom,0px)}
+main{padding-top:14px;padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--bg);display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin:0 auto;padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px));padding-bottom:env(safe-area-inset-bottom,0px)}
 nav button{background:none;border:0;padding:12px 2px;font:600 12px var(--ui);color:var(--mute);border-top:2px solid transparent;margin-top:-1px;cursor:pointer}
 nav button[aria-selected=true]{color:var(--fg);border-top-color:var(--money)}
 nav button:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--info);outline-offset:2px}
@@ -330,5 +331,6 @@ summary{list-style-position:inside}
 <script src="js/a3.js"></script>
 <script src="js/a4.js"></script>
 <script src="js/a5.js"></script>
+<script>/* al cambiar de pestaña, se vuelve arriba */document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{try{window.scrollTo(0,0);}catch(e){}}));</script>
 </body>
 </html>

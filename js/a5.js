@@ -6,6 +6,75 @@ function buildSettings(){
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
+/* ---------- órdenes: el mismo código las ejecuta aquí o en el servidor 24/7 ---------- */
+function applySettings(o){
+  const s=S.settings;
+  if(isFinite(o.fee)&&o.fee>=0)s.fee=o.fee;if(isFinite(o.maxDay)&&o.maxDay>=.005&&o.maxDay<=.2)s.maxDay=o.maxDay;if(isFinite(o.slip)&&o.slip>=0)s.slip=o.slip;
+  if(o.universe>=5&&o.universe<=60&&o.universe!==s.universe){s.universe=o.universe;market.uniAt=0;}
+  if(o.markets)['BN','BF','HL'].forEach(x=>{const v=!!o.markets[x];if(v!==s.markets[x]){s.markets[x]=v;market.uniAt=0;}});
+  if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
+  if(isFinite(o.maxKids)&&o.maxKids>=0&&o.maxKids<=5)s.maxKids=o.maxKids;
+  if('repl' in o)s.repl=!!o.repl;if('shorts' in o)s.shorts=!!o.shorts;
+  if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
+  if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
+  if('device' in o)s.device=String(o.device||'').slice(0,60);
+  if(o.tf&&TF_MS[o.tf]&&o.tf!==s.tf){s.tf=o.tf;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
+  if(o.params){const P=S.agents[0].params;for(const k in DEF_PARAMS){const v=parseFloat(o.params[k]);if(isFinite(v)){const [lo,hi]=BOUNDS[k];P[k]=Math.min(hi,Math.max(lo,INTS.has(k)?Math.round(v):v));}}if(P.emaF>=P.emaS)P.emaS=P.emaF+4;}
+}
+function applyCmd(c,a){
+  a=a||{};const kid=()=>agentById(+a.kid),ok=(msg,x)=>Object.assign({ok:true,msg},x||{}),no=msg=>({ok:false,msg});
+  switch(c){
+    case 'run':S.running=a.on===undefined?!S.running:!!a.on;S.lastSeen=Date.now();if(S.running)nextScan=0;
+      L(null,'info',S.running?'Agente reanudado.':'Agente en pausa: no abre operaciones nuevas, pero sigue vigilando los stops de las abiertas.');return ok(S.running?'Reanudado.':'En pausa.');
+    case 'scan':return ok('Reevaluando.');
+    case 'capital':{const v=+a.v;if(!(v>=20))return no('Mínimo $20');
+      S=fresh(v,S.settings,S.exp);ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Todo reiniciado.`);return ok('Capital fijado.');}
+    case 'settings':applySettings(a);L(null,'info','Ajustes guardados.');return ok('Ajustes guardados.');
+    case 'spawn':{const par=agentById(+a.parentId);if(!par)return no('Elige un padre vivo.');const e=spawnChild(par,a.g||{},a.fund||null,true);return e?no('No se pudo replicar: '+e+'.'):ok('Hijo creado: arrancará en los próximos latidos.');}
+    case 'fund':{const ch=kid();if(!ch)return no('No hay hijos.');const par=agentById(ch.parentId);const e=par?fundChild(par,ch,a.amt):'sin padre';return e?no('No se pudo financiar: '+e+'.'):ok(`${ch.name} financiado.`);}
+    case 'msg':{const ch=kid();if(!ch)return no('No hay hijos.');const par=agentById(ch.parentId);const e=par?sendMsg(par,ch,a.text):'sin padre';if(!e)readInbox(ch);return e?no('No enviado: '+e+'.'):ok(`Mensaje entregado a ${ch.name}.`);}
+    case 'verify':{const ch=kid();if(!ch)return no('No hay hijos.');const v=verifyConst(ch);if(!v&&ch.status==='alive')kill(ch,'constitución alterada: el hijo se apaga por seguridad');
+      return ok(v?`Constitución de ${ch.name} verificada: huella ${ch.constHash} idéntica a la del original.`:`La constitución de ${ch.name} no coincide${ch.status!=='dead'?'; se ha apagado por seguridad':''}.`);}
+    case 'prune':{const n=pruneDead(true);return ok(n?`${n} hijo(s) retirado(s); su dinero volvió a la reserva del padre.`:'No hay hijos muertos sin posiciones que retirar.');}
+    case 'report':return ok('Informe listo.',{text:report()});
+    case 'import':{const o=a.state;if(!valid(o))return no('La copia no es válida.');o.agents.forEach(x=>{delete x._st;});const tok=nset().token;S=migrate(o);if(IS_SERVER&&!nset().token&&tok)nset().token=tok;
+      nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;S.lastSeen=Date.now();L(null,'info','Agente cargado desde una copia.');return ok('Copia restaurada.');}
+  }
+  return no('Orden desconocida.');
+}
+/* ejecuta una orden: aquí, o en el servidor si este dispositivo lo está mirando */
+async function act(c,a){
+  if(REM.on){
+    try{const r=await fetch(cleanUrl(REM.url)+'/agent/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:c,args:a||{},key:REM.key||''})});
+      const j=await r.json();if(r.status===401)return {ok:false,msg:'El servidor pide una clave: escríbela en Ajustes → Servidor 24/7.'};
+      await pullRemote().catch(()=>{});render();return j;}
+    catch(e){return {ok:false,msg:'No se pudo hablar con el servidor ('+why(e)+').'};}
+  }
+  const r=applyCmd(c,a);
+  if(r.ok){save(true);if(['scan','capital','settings','import','run'].includes(c)){if(c==='run'&&!S.running)render();else tick(c!=='run');}else render();}
+  return r;
+}
+/* lo que el servidor manda a los dispositivos que lo miran: estado ligero, precios y estado de las fuentes */
+function exportView(){
+  const st=JSON.parse(JSON.stringify(S));if(st.settings.notify){st.settings.notify.hasToken=!!st.settings.notify.token;st.settings.notify.token='';}
+  st.log=st.log.slice(0,150);
+  st.agents.forEach((a,i)=>{const o=S.agents[i];a._st=stats(o);a.closed=a.closed.slice(0,40);if(a.hist.length>300){const k=Math.ceil(a.hist.length/300);a.hist=a.hist.filter((_,j)=>j%k===0||j===a.hist.length-1);}});
+  const keys=new Set([...market.universe,...S.agents.flatMap(a=>a.positions.map(p=>p.sym))]),pick=o=>{const r={};keys.forEach(k=>{if(o[k]!==undefined)r[k]=o[k];});return r;};
+  return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),universe:market.universe,lists:market.lists,src:market.src,err:market.err},
+    ui:{radar:ui.radar,summary:ui.summary,reasons:ui.reasons,scanAt:ui.scanAt},KR:{ok:KR.ok,err:KR.err,model:KR.model,ms:KR.ms,at:KR.at,fake:KR.fake,busy:KR.busy,asked:KR.asked}};
+}
+let remErr=null,remAt=0;
+async function pullRemote(){
+  try{const j=await fget(cleanUrl(REM.url)+'/agent/state'+(REM.key?'?key='+encodeURIComponent(REM.key):''));
+    if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
+    S=j.S;const now=Date.now();
+    market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;
+    Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.err=j.market.err;
+    market.src={};for(const k in j.market.src||{})market.src[k]=Object.assign({},j.market.src[k],{at:j.market.src[k].at?now-(j.at-j.market.src[k].at):0});
+    Object.assign(ui,j.ui||{});Object.assign(KR,j.KR||{});if(KR.at)KR.at=now-(j.at-KR.at);
+    remErr=null;remAt=now;
+  }catch(e){remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
+}
 const inFrame=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
 function renderBan(){
   const st=Object.values(market.src),tried=st.some(x=>'ok' in x),live=st.some(x=>x.ok&&Date.now()-x.at<90000);
@@ -32,29 +101,28 @@ function renderBan(){
 }
 function render(){
   updateHero();renderBan();
-  if(tab==='panel')renderPanel();else if(tab==='log')renderLog();else if(tab==='stats')renderStats();else if(tab==='lin')renderLin();
+  if(tab==='panel')renderPanel();else if(tab==='log')renderLog();else if(tab==='stats')renderStats();else if(tab==='lin')renderLin();else if(tab==='set'&&REM.on)renderRem();
 }
 function show(t){
   tab=t;document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='s-'+t));
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.t===t)));
-  if(t==='set')buildSettings();render();document.querySelector('main').scrollTop=0;
+  if(t==='set'){buildSettings();renderRem();}render();document.querySelector('main').scrollTop=0;
 }
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));
 $('stAgent').addEventListener('change',renderStats);
 
 let armT=null;
-$('capBtn').addEventListener('click',()=>{
+$('capBtn').addEventListener('click',async()=>{
   const v=parseFloat($('capIn').value),b=$('capBtn');
   if(!(v>=20)){b.textContent='Mínimo $20';setTimeout(()=>{b.textContent='Fijar y reiniciar';},1800);return;}
   if(!armT){b.textContent='Toca otra vez para confirmar';b.classList.add('warn');armT=setTimeout(()=>{armT=null;b.textContent='Fijar y reiniciar';b.classList.remove('warn');},4000);return;}
   clearTimeout(armT);armT=null;b.classList.remove('warn');b.textContent='Fijar y reiniciar';
-  S=fresh(v,S.settings,S.exp);ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;
-  L(null,'info',`Capital fijado en ${money(v)}. Todo reiniciado.`);save(true);$('stAgent').innerHTML='';tick(true);
+  const r=await act('capital',{v});if(!r.ok){b.textContent=r.msg;setTimeout(()=>{b.textContent='Fijar y reiniciar';},2500);}$('stAgent').innerHTML='';
 });
-$('runBtn').addEventListener('click',()=>{S.running=!S.running;S.lastSeen=Date.now();L(null,'info',S.running?'Agente reanudado.':'Agente en pausa: no abre operaciones nuevas, pero sigue vigilando los stops de las abiertas.');save(true);render();if(S.running){nextScan=0;tick(false);}});
-$('scanBtn').addEventListener('click',()=>tick(true));
-$('repBtn').addEventListener('click',()=>{
-  const txt=report(),ta=$('repTxt');ta.value=txt;
+$('runBtn').addEventListener('click',()=>act('run',{on:!S.running}));
+$('scanBtn').addEventListener('click',()=>act('scan'));
+$('repBtn').addEventListener('click',async()=>{
+  let txt;if(REM.on){const r=await act('report');txt=r.text||r.msg;}else txt=report();const ta=$('repTxt');ta.value=txt;
   const manual=()=>{ta.hidden=false;ta.focus();ta.select();$('repMsg').textContent='Selecciona todo el texto del recuadro y cópialo.';};
   try{navigator.clipboard.writeText(txt).then(()=>{$('repMsg').textContent='Informe copiado. Pégalo en el chat con Claude.';$('repMsg').className='note up';},manual);}catch(e){manual();}
 });
@@ -85,8 +153,39 @@ $('bkCopy').addEventListener('click',()=>{save(true);const j=JSON.stringify(S);t
 $('bkTg').addEventListener('click',()=>{save(true);$('bkMsg').textContent=tgBackup()?'Copia enviada a tu Telegram como archivo.':'Primero configura Telegram en "Avisos".';});
 $('bkFile').addEventListener('change',e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
-  rd.onload=()=>{try{const o=JSON.parse(rd.result);if(!valid(o))throw 0;S=migrate(o);save(true);$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;$('bkMsg').textContent='Copia restaurada desde el archivo.';buildSettings();tick(true);}catch(err){$('bkMsg').textContent='Ese archivo no es una copia válida de Automaton.';}e.target.value='';};
+  rd.onload=async()=>{let o=null;try{o=JSON.parse(rd.result);}catch(err){}e.target.value='';
+    const r=await act('import',{state:o});$('bkMsg').textContent=r.ok?'Copia restaurada desde el archivo'+(REM.on?' en el servidor.':'.'):'Ese archivo no es una copia válida de Automaton.';
+    if(r.ok){$('capIn').value=S.initial;$('stAgent').innerHTML='';buildSettings();}};
   rd.readAsText(f);
+});
+/* servidor 24/7 */
+function renderRem(t){
+  if(!$('rUrl').value)$('rUrl').value=REM.url||'https://autokill.onrender.com';if(!$('rKey').value&&REM.key)$('rKey').value=REM.key;
+  $('rMsg').className='note'+(REM.on&&remErr?' down':REM.on?' up':'');
+  $('rMsg').textContent=t||(REM.on?(remErr?'Mirando el servidor, pero no responde: '+remErr+'. Reintentando.':'Mirando el agente del servidor'+(remAt?' · actualizado '+clock(remAt):'')+'. Este dispositivo no opera por su cuenta.'):'Este dispositivo opera su propio agente (solo mientras la app está abierta).');
+  $('rOff').disabled=!REM.on;$('rView').disabled=REM.on;
+}
+const remConf=()=>{REM.url=cleanUrl($('rUrl').value||'https://autokill.onrender.com');REM.key=$('rKey').value.trim();$('rUrl').value=REM.url;};
+$('rPush').addEventListener('click',async()=>{
+  remConf();const b=$('rPush');b.disabled=true;renderRem('Enviando tu agente al servidor…');
+  try{
+    if(!REM.on)save(true);
+    const local=REM.on?await loadState():S;
+    const r=await fetch(REM.url+'/agent/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'import',args:{state:local},key:REM.key})});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===401)throw new Error('clave incorrecta');if(!r.ok||!j.ok)throw new Error(j.msg||j.error||('el servidor respondió '+r.status));
+    REM.on=true;remSave();await pullRemote();render();renderRem('Hecho: tu agente ya funciona 24/7 en el servidor. Desde aquí lo ves y lo controlas.');
+  }catch(e){renderRem('No se pudo: '+((e&&e.message&&!/fetch/i.test(e.message))?e.message:'el servidor no responde (si estaba dormido tarda un minuto: vuelve a probar)')+'.');}
+  b.disabled=false;
+});
+$('rView').addEventListener('click',async()=>{
+  remConf();const was=REM.on;REM.on=true;renderRem('Conectando con el servidor…');
+  try{await pullRemote();remSave();render();renderRem();}
+  catch(e){REM.on=was;remSave();renderRem('No se pudo ver el servidor: '+(remErr||'sin respuesta')+'.');}
+});
+$('rOff').addEventListener('click',async()=>{
+  REM.on=false;remSave();remErr=null;S=await loadState();market.universe=[];market.uniAt=0;market.src={BN:{},BF:{},HL:{}};market.price={};ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;
+  $('capIn').value=S.initial;$('stAgent').innerHTML='';buildSettings();renderRem('Vuelves a usar el agente de este dispositivo. Ojo: si el del servidor sigue activo, ahora tienes dos agentes distintos.');tick(true);
 });
 $('kTest').addEventListener('click',async()=>{
   const u=cleanUrl($('kUrl').value),m=$('kMsg');$('kUrl').value=u;
@@ -101,44 +200,37 @@ $('diagBtn').addEventListener('click',()=>{diagnose().catch(()=>{$('diagBtn').di
 $('quotesBox').addEventListener('toggle',renderQuotes);
 $('netRetry').addEventListener('click',()=>{market.uniAt=0;market.universe=[];market.err=null;$('netRetry').textContent='Conectando…';tick(true).finally(()=>{$('netRetry').textContent='Reintentar';});});
 $('netCopy').addEventListener('click',()=>{const t=$('netMsg').textContent;try{navigator.clipboard.writeText(t).then(()=>{$('netCopy').textContent='Copiado';},()=>{});}catch(e){}});
-$('gBtn').addEventListener('click',()=>{const par=agentById(+$('gPar').value);if(!par){$('gInfo').textContent='Elige un padre vivo.';return;}
+$('gBtn').addEventListener('click',async()=>{
   const g={};if($('gName').value.trim())g.name=$('gName').value.trim();if($('gSpec').value)g.spec=$('gSpec').value;if($('gMsg').value.trim())g.msg=$('gMsg').value.trim();
-  const err=spawnChild(par,g,$('gFund').value?+$('gFund').value:null,true);
-  if(err){$('gInfo').textContent='No se pudo replicar: '+err+'.';return;}
-  $('gName').value='';$('gMsg').value='';$('gFund').value='';save(true);render();$('gInfo').textContent='Hijo creado: arrancará en los próximos latidos.';});
+  const r=await act('spawn',{parentId:+$('gPar').value,g,fund:$('gFund').value?+$('gFund').value:null});
+  if(r.ok){$('gName').value='';$('gMsg').value='';$('gFund').value='';}$('gInfo').textContent=r.msg;});
 const kidSel=()=>agentById(+$('hKid').value);
-const hOut=(t)=>{$('hInfo').textContent=t;save(true);render();};
-$('hFund').addEventListener('click',()=>{const c=kidSel();if(!c)return hOut('No hay hijos.');const par=agentById(c.parentId);const e=par?fundChild(par,c,$('hAmt').value):'sin padre';hOut(e?'No se pudo financiar: '+e+'.':`${c.name} financiado.`);if(!e)$('hAmt').value='';});
-$('hSend').addEventListener('click',()=>{const c=kidSel();if(!c)return hOut('No hay hijos.');const par=agentById(c.parentId);const e=par?sendMsg(par,c,$('hMsg').value):'sin padre';if(!e){$('hMsg').value='';readInbox(c);}hOut(e?'No enviado: '+e+'.':`Mensaje entregado a ${c.name}.`);});
+const hOut=(t)=>{$('hInfo').textContent=t;};
+$('hFund').addEventListener('click',async()=>{const r=await act('fund',{kid:+$('hKid').value,amt:+$('hAmt').value});hOut(r.msg);if(r.ok)$('hAmt').value='';});
+$('hSend').addEventListener('click',async()=>{const r=await act('msg',{kid:+$('hKid').value,text:$('hMsg').value});hOut(r.msg);if(r.ok)$('hMsg').value='';});
 $('hRep').addEventListener('click',()=>{const c=kidSel();if(!c)return hOut('No hay hijos.');hOut(childReport(c));});
-$('hVer').addEventListener('click',()=>{const c=kidSel();if(!c)return hOut('No hay hijos.');const ok=verifyConst(c);if(!ok&&c.status==='alive')kill(c,'constitución alterada: el hijo se apaga por seguridad');hOut(ok?`Constitución de ${c.name} verificada: huella ${c.constHash} idéntica a la del original.`:`La constitución de ${c.name} no coincide${c.status!=='dead'?'; se ha apagado por seguridad':''}.`);});
-$('hPrune').addEventListener('click',()=>{const n=pruneDead(true);hOut(n?`${n} hijo(s) retirado(s); su dinero volvió a la reserva del padre.`:'No hay hijos muertos sin posiciones que retirar.');});
-$('saveSet').addEventListener('click',()=>{
-  const s=S.settings,n=id=>parseFloat($(id).value);
-  const fee=n('sFee')/100,slip=n('sSlip')/100,uni=Math.round(n('sUni')),kids=Math.round(n('sKids'));
-  if(isFinite(fee)&&fee>=0)s.fee=fee;{const d=n('sDay')/100;if(isFinite(d)&&d>=.005&&d<=.2)s.maxDay=d;}if(isFinite(slip)&&slip>=0)s.slip=slip;
-  if(uni>=5&&uni<=60&&uni!==s.universe){s.universe=uni;market.uniAt=0;}
-  ['BN','BF','HL'].forEach(x=>{const v=$('m'+x).value==='1';if(v!==s.markets[x]){s.markets[x]=v;market.uniAt=0;}});
-  if(!s.markets.BN&&!s.markets.BF&&!s.markets.HL){s.markets.BN=true;}
-  if(isFinite(kids)&&kids>=0&&kids<=5)s.maxKids=kids;
-  s.repl=$('sRep').value==='1';s.shorts=$('mSh').value==='1';
-  {const k=kset(),u=cleanUrl($('kUrl').value),m=$('kMode').value;$('kUrl').value=u;if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
-  {const nn=nset();nn.token=$('tgToken').value.trim();nn.chat=$('tgChat').value.trim();nn.ops=$('nOps').value==='1';nn.daily=$('nDaily').value==='1';nn.bk=$('nBk').value==='1';s.device=$('devName').value.trim();}
-  if($('sTf').value!==s.tf){s.tf=$('sTf').value;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
-  const P=S.agents[0].params;
-  for(const k in DEF_PARAMS){const v=parseFloat($('p_'+k).value);if(isFinite(v)){const [lo,hi]=BOUNDS[k];P[k]=Math.min(hi,Math.max(lo,INTS.has(k)?Math.round(v):v));}}
-  if(P.emaF>=P.emaS)P.emaS=P.emaF+4;
-  L(null,'info','Ajustes guardados.');save(true);buildSettings();tick(true);
-  const b=$('saveSet');b.textContent='Guardado';setTimeout(()=>{b.textContent='Guardar ajustes';},1500);
+$('hVer').addEventListener('click',async()=>{hOut((await act('verify',{kid:+$('hKid').value})).msg);});
+$('hPrune').addEventListener('click',async()=>{hOut((await act('prune')).msg);});
+function collectSettings(){
+  const n=id=>parseFloat($(id).value),params={};for(const k in DEF_PARAMS)params[k]=$('p_'+k).value;
+  return {fee:n('sFee')/100,slip:n('sSlip')/100,maxDay:n('sDay')/100,universe:Math.round(n('sUni')),maxKids:Math.round(n('sKids')),
+    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',
+    kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
+    device:$('devName').value.trim(),tf:$('sTf').value,params};
+}
+$('saveSet').addEventListener('click',async()=>{
+  const r=await act('settings',collectSettings());buildSettings();
+  const b=$('saveSet');b.textContent=r.ok?'Guardado':r.msg;setTimeout(()=>{b.textContent='Guardar ajustes';},r.ok?1500:3500);
 });
 window.addEventListener('resize',()=>{if(tab==='stats')renderStats();});
 
 /* copia de seguridad */
 $('expBtn').addEventListener('click',()=>{save(true);const t=$('bk');t.style.display='block';t.value=JSON.stringify(S);t.focus();t.select();$('bkMsg').textContent='Copia lista: cópiala y guárdala en un sitio seguro (notas, correo).';});
-$('impBtn').addEventListener('click',()=>{
+$('impBtn').addEventListener('click',async()=>{
   const t=$('bk');if(t.style.display==='none'){t.style.display='block';t.value='';t.focus();$('bkMsg').textContent='Pega aquí la copia y vuelve a pulsar "Pegar copia".';return;}
-  try{const o=JSON.parse(t.value);if(!valid(o))throw 0;S=migrate(o);save(true);t.value='';t.style.display='none';$('capIn').value=S.initial;$('stAgent').innerHTML='';nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;$('bkMsg').textContent='Copia restaurada.';tick(true);}
-  catch(e){$('bkMsg').textContent='La copia no es válida.';}
+  let o=null;try{o=JSON.parse(t.value);}catch(e){}
+  const r=await act('import',{state:o});
+  if(r.ok){t.value='';t.style.display='none';$('capIn').value=S.initial;$('stAgent').innerHTML='';$('bkMsg').textContent='Copia restaurada'+(REM.on?' en el servidor.':'.');}else $('bkMsg').textContent='La copia no es válida.';
 });
 /* arranque */
 (async()=>{

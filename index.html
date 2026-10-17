@@ -202,6 +202,17 @@ summary{list-style-position:inside}
 
   <section id="s-set">
     <div class="card">
+      <h2>Servidor 24/7</h2>
+      <p class="note" style="margin:0 0 8px">El agente puede vivir en tu servidor de Render y operar día y noche aunque cierres la app o apagues el móvil. Este dispositivo pasa a ser la pantalla para verlo y darle órdenes; los cambios que hagas aquí se aplican en el servidor.</p>
+      <div class="field" style="gap:10px">
+        <div class="field"><label class="lbl" for="rUrl">Dirección del servidor</label><input id="rUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://autokill.onrender.com"></div>
+        <div class="field"><label class="lbl" for="rKey">Clave (solo si la pusiste en Render como AGENT_KEY)</label><input id="rKey" type="password" autocomplete="off" placeholder="opcional"></div>
+        <button id="rPush" class="btn pri" type="button">Pasar mi agente al servidor</button>
+        <div class="row"><button id="rView" class="btn" type="button" style="flex:1">Ver el del servidor</button><button id="rOff" class="btn" type="button" style="flex:1">Usar el de este dispositivo</button></div>
+        <p id="rMsg" class="note" style="margin:0"></p>
+      </div>
+    </div>
+    <div class="card">
       <h2>Mercado y costes</h2>
       <div class="grid2">
         <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%)</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>

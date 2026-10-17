@@ -33,7 +33,7 @@ function applyCmd(c,a){
       const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x),0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
       S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
-      S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;
+      S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
@@ -48,8 +48,13 @@ function applyCmd(c,a){
       if(!p)return no('Esa posición ya no está abierta.');
       if(!sessOpen(sessOf(p.sym),Date.now()))return no('Ese mercado está cerrado ahora: no se puede vender hasta que abra.');
       if(!pxFresh(p.sym,90000))return no('No hay precio actual de '+base(p.sym)+' ahora mismo; prueba en unos segundos.');
-      const n0=ag.closed.length;closePos(ag,p,'venta manual');const t=ag.closed.length>n0?ag.closed[0]:null;
+      const n0=ag.closed.length;closePos(ag,p,'venta manual',undefined,'manual');const t=ag.closed.length>n0?ag.closed[0]:null;
       return ok(t?`Vendido ${base(p.sym)} a ${px(t.exit)}: ${sgn(t.pnl)} limpios.`:'Vendido.');}
+    case 'mode':{const v=a.cap==null||a.cap===''?null:Math.round(+a.cap*100)/100;
+      if(v!=null&&!(v>=.01&&v<=1000))return no('Pon un límite entre 0,01 y 1000 $.');
+      if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
+      S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan.');
+      S.agents.forEach(checkExits);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}
     case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}
@@ -60,8 +65,18 @@ function applyCmd(c,a){
 }
 /* informe con las etapas anteriores (cada vez que se reinició el saldo) */
 function reportFull(){
-  const r=S.runs||[],ev=evoReport();if(!r.length)return report()+ev;
+  const r=S.runs||[],ev=evoReport()+labReport();if(!r.length)return report()+ev;
   return report()+ev+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
+}
+/* tu registro en el informe: así se puede revisar con Claude si el límite o las ventas manuales compensan */
+function labReport(){
+  const l=S.lab?S.lab.list:[];if(!l.length)return '\nTUS DECISIONES: modo '+(S.settings.capNet?'límite '+money(S.settings.capNet):'automático')+' · aún sin ventas tuyas';
+  const f=(t,s)=>`  ${t}: ${s.n} ventas, ${sgn(s.pnl)} · comparadas ${s.done}: tú ${sgn(s.you)} / plan del agente ${sgn(s.plan)} → ${s.diff>=0?'ganas':'pierdes'} ${money(Math.abs(s.diff))} · mejor que el plan en ${s.better} de ${s.done} · ${s.pend} en seguimiento · media ${Math.round(s.held)} min abiertas`;
+  const lims=[...new Set(l.filter(e=>e.kind==='limit').map(e=>e.limit))].sort((a,b)=>a-b);
+  const d=t=>new Date(t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  return '\nTUS DECISIONES (no cuentan en el aprendizaje del agente) · modo actual: '+(S.settings.capNet?'límite '+money(S.settings.capNet):'automático')+'\n'+
+    [f('Con límite (todas)',labSum('limit')),...lims.map(v=>f('  límite '+money(v),labSum('limit',v))),f('Ventas manuales',labSum('manual'))].join('\n')+
+    '\n  Últimas:\n'+l.slice(0,20).map(e=>`    ${d(e.t1)} ${e.kind==='limit'?'límite '+money(e.limit):'manual'} ${base(e.sym)} ${e.side==='short'?'corto':'largo'} ${sgn(e.pnl)} en ${Math.round((e.t1-e.t0)/60000)} min · llevaba ${e.prog==null?'—':Math.round(e.prog*100)+'%'} hacia su objetivo · plan: ${e.cf?(e.cf.pnl==null?e.cf.why:sgn(e.cf.pnl)+' ('+e.cf.why+')'):'en seguimiento'}`).join('\n');
 }
 /* ejecuta una orden: aquí, o en el servidor si este dispositivo lo está mirando */
 async function act(c,a){
@@ -78,7 +93,7 @@ async function act(c,a){
 /* lo que el servidor manda a los dispositivos que lo miran: estado ligero, precios y estado de las fuentes */
 function exportView(){
   const st=JSON.parse(JSON.stringify(S));if(st.settings.notify){st.settings.notify.hasToken=!!st.settings.notify.token;st.settings.notify.token='';}
-  st.log=st.log.slice(0,150);
+  st.log=st.log.slice(0,150);if(st.lab)st.lab.list=st.lab.list.slice(0,150);
   st.agents.forEach((a,i)=>{const o=S.agents[i];a._st=stats(o);a.closed=a.closed.slice(0,40);if(a.hist.length>300){const k=Math.ceil(a.hist.length/300);a.hist=a.hist.filter((_,j)=>j%k===0||j===a.hist.length-1);}});
   const keys=new Set([...market.universe,...S.agents.flatMap(a=>a.positions.map(p=>p.sym))]),pick=o=>{const r={};keys.forEach(k=>{if(o[k]!==undefined)r[k]=o[k];});return r;};
   return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),universe:market.universe,lists:market.lists,src:market.src,err:market.err,ws:{BN:wsLive('BN'),BF:wsLive('BF'),HL:wsLive('HL')}},

@@ -176,7 +176,7 @@ async function pollPrices(){
   const all=new Set([...market.universe,...need]),by={BN:[],BF:[],HL:[]};
   /* con su mercado cerrado no hace falta precio continuo, pero cada fuente se consulta al menos una vez por minuto para saber que sigue conectada */
   const stale=s=>!(market.src[s]&&market.src[s].ok&&Date.now()-market.src[s].at<60000);
-  all.forEach(k=>{const s=srcOf(k);if(by[s]&&!cooling(s)&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
+  all.forEach(k=>{const s=srcOf(k);if(by[s]&&!cooling(s)&&!wsLive(s)&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
   const jobs=[];
   if(by.BN.length)jobs.push(jget('/api/v3/ticker/price?symbols='+encodeURIComponent(JSON.stringify(by.BN.map(idOf))))
     .catch(()=>jget('/api/v3/ticker/price'))
@@ -197,6 +197,52 @@ async function pollPrices(){
   market.err=Object.values(market.src).some(x=>x.ok&&Date.now()-x.at<90000)?null:'ninguna fuente responde';
   /* una fuente que se quedó fuera (por ejemplo, tras un "demasiadas peticiones") se vuelve a cargar en cuanto termina su descanso, sin esperar 30 min */
   if(['BN','BF','HL'].some(x=>S.settings.markets[x]&&!market.lists[x].length&&!cooling(x))&&Date.now()-market.uniAt>120000)market.uniAt=0;
+}
+/* ---------- precios en directo: conexión continua (WebSocket) con Binance, Binance Futuros y Hyperliquid ----------
+   Los precios llegan solos en cuanto cambian, sin ir preguntando. Si una conexión cae, se reconecta sola y,
+   mientras tanto, se siguen pidiendo los precios como antes. Con la conexión viva, stops y objetivos se vigilan al segundo. */
+const WSURL={BN:['wss://stream.binance.com:9443/ws/!miniTicker@arr','wss://data-stream.binance.vision/ws/!miniTicker@arr'],BF:['wss://fstream.binance.com/ws/!miniTicker@arr'],HL:['wss://api.hyperliquid.xyz/ws']};
+const WS={s:{},at:{},t0:{},try:{},next:{},dex:new Set(),fast:0,ping:0};
+const wsLive=s=>!!WS.at[s]&&Date.now()-WS.at[s]<20000;
+function wsTracked(src){const out=new Set(market.lists[src]||[]);if(S)S.agents.forEach(a=>a.positions.forEach(p=>{if(srcOf(p.sym)===src)out.add(p.sym);}));return out;}
+function wsMsg(src,list){
+  const now=Date.now(),tr=wsTracked(src);
+  list.forEach(([k,v])=>{if(tr.has(k))setPx(k,v);});
+  tr.forEach(k=>{if(market.price[k]>0)market.pt[k]=now;}); /* el canal está vivo: los que no se movieron siguen valiendo lo mismo */
+  WS.at[src]=now;const st=market.src[src]||(market.src[src]={});st.ok=true;st.at=now;st.err=null;
+  /* stops, trailing y objetivos al instante (como mucho una vez por segundo) */
+  if(S&&!REM.on&&now-WS.fast>1000&&S.agents.some(a=>a.positions.length)){WS.fast=now;try{S.agents.forEach(checkExits);}catch(e){}}
+}
+function wsOpen(src){
+  if(WS.s[src]||Date.now()<(WS.next[src]||0))return;
+  const urls=WSURL[src],n=WS.try[src]||0,url=urls[n%urls.length];let ws;
+  const retry=()=>{const t=(WS.try[src]=(WS.try[src]||0)+1);WS.next[src]=Date.now()+Math.min(60000,3000*t);};
+  try{ws=new WebSocket(url);}catch(e){retry();return;}
+  WS.s[src]=ws;WS.t0[src]=Date.now();
+  ws.onopen=()=>{WS.try[src]=0;if(src==='HL'){WS.dex=new Set();wsHLsub();}};
+  ws.onmessage=ev=>{let j;try{j=JSON.parse(typeof ev.data==='string'?ev.data:String(ev.data));}catch(e){return;}
+    if(src==='HL'){if(j&&j.channel==='allMids'&&j.data&&j.data.mids)wsMsg('HL',Object.entries(j.data.mids).map(([c,v])=>['HL:'+c,+v]));}
+    else if(Array.isArray(j))wsMsg(src,j.map(x=>[src+':'+x.s,+x.c]));};
+  const drop=()=>{if(WS.s[src]!==ws)return;WS.s[src]=null;WS.at[src]=0;retry();};
+  ws.onclose=drop;ws.onerror=()=>{drop();try{ws.close();}catch(e){}};
+}
+function wsHLsub(){
+  const ws=WS.s.HL;if(!ws||ws.readyState!==1)return;
+  const keys=[...wsTracked('HL')],dexes=new Set(keys.map(k=>idOf(k).split(':')[0]).filter(Boolean));
+  dexes.forEach(d=>{if(!WS.dex.has(d)){WS.dex.add(d);try{ws.send(JSON.stringify({method:'subscribe',subscription:{type:'allMids',dex:d}}));}catch(e){}}});
+  if(Date.now()-WS.ping>45000){WS.ping=Date.now();try{ws.send('{"method":"ping"}');}catch(e){}}
+}
+function wsSync(){
+  if(typeof WebSocket==='undefined'||REM.on||!S)return;
+  const m=S.settings.markets,now=Date.now();
+  for(const src of ['BN','BF','HL']){
+    const ws=WS.s[src],kill=()=>{WS.s[src]=null;WS.at[src]=0;try{ws.close();}catch(e){}};
+    if(!m[src]){if(ws)kill();continue;}
+    /* conexión colgada (no abre en 20 s o lleva 1 min sin datos): se cierra y se vuelve a abrir */
+    if(ws&&((ws.readyState===0&&now-WS.t0[src]>20000)||(ws.readyState===1&&now-(WS.at[src]||WS.t0[src])>60000))){kill();WS.next[src]=0;}
+    if(!WS.s[src])wsOpen(src);
+  }
+  wsHLsub();
 }
 async function fetchKlines(tf){
   const now=Date.now(),ms=TF_MS[tf];market.k[tf]=market.k[tf]||{};market.kAt=market.kAt||{};market.kAt[tf]=Math.floor(now/ms);

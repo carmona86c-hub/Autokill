@@ -41,7 +41,7 @@ function notifyEvt(type,msg){
   nq.l.push((type==='open'?'🟢 ':type==='close'?'🔵 ':'⚠️ ')+msg);
   clearTimeout(nq.t);nq.t=setTimeout(()=>{const txt=nq.l.slice(0,12).join('\n');nq.l=[];tgPost(txt);sysPost(txt);},4000);
 }
-function totals(){const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a),0);return {tot,pl:tot-S.initial,open:ags.reduce((t,a)=>t+a.positions.length,0),alive:alive().length};}
+function totals(){const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a)+(a.vault||0),0);return {tot,pl:tot-S.initial,open:ags.reduce((t,a)=>t+a.positions.length,0),alive:alive().length};}
 function dailyText(){
   const t=totals(),d0=new Date();d0.setHours(0,0,0,0);
   const today=S.agents.flatMap(a=>a.closed).filter(x=>x.t1>=d0.getTime()),pt=today.reduce((s,x)=>s+x.pnl,0),w=today.filter(x=>x.pnl>0).length;
@@ -160,7 +160,7 @@ const isShort=p=>p.side==='short';
 const feeOf=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
 const posVal=(p,price)=>isShort(p)?p.qty*(2*p.entry-price):p.qty*price;
 const eq=a=>a.cash+a.positions.reduce((t,p)=>t+Math.max(0,posVal(p,market.price[p.sym]||p.entry)),0);
-const total=a=>eq(a)+a.swept;
+const total=a=>eq(a)+a.swept+(a.vault||0);
 const ret=a=>(total(a)-a.initial)/a.initial;
 const TIER={normal:{risk:1,pos:99,syms:999},low_compute:{risk:.5,pos:2,syms:15},critical:{risk:.25,pos:1,syms:5},dead:{risk:0,pos:0,syms:0}};
 function updateTier(a){
@@ -176,8 +176,14 @@ function kill(a,why){
   if(a.life!=='dead')lifeEvt(a,'dead',why||'sin fondos operativos');
   L(a,'dead',why?`${a.name} se apaga: ${why}.`:`Sin fondos operativos. ${a.name} se apaga con ${money(a.cash)} sin usar.`);
 }
-/* sin reserva: el beneficio se queda en el capital con el que opera (interés compuesto) */
-function sweep(a){}
+/* cartera reservada: solo con tu límite de ganancia puesto. Lo que el agente original tenga por encima de su capital
+   pasa, en efectivo, a una cartera aparte y congelada; el agente sigue operando con su capital. En automático no se aparta nada. */
+function sweep(a){
+  if(a.parentId!=null||!(S.settings.capNet>0))return;
+  const x=Math.min(a.cash,eq(a)-a.initial);
+  if(x>=.005){a.cash-=x;a.vault=(a.vault||0)+x;a._vq=(a._vq||0)+x;}
+  if(a._vq>=.005&&Date.now()-(a._vt||0)>600000){L(a,'reserve',`A la cartera reservada: +${money(a._vq)} de beneficio (reservado en total ${money(a.vault)}, congelado). El agente sigue operando con su capital de ${money(a.initial)}.`);a._vq=0;a._vt=Date.now();}
+}
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
 function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym);return Math.max(0,posVal(p,price))-f-p.basis;}
 function openPos(a,an,P){

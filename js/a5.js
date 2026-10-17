@@ -28,7 +28,9 @@ function applyCmd(c,a){
       L(null,'info',S.running?'Agente reanudado.':'Agente en pausa: no abre operaciones nuevas, pero sigue vigilando los stops de las abiertas.');return ok(S.running?'Reanudado.':'En pausa.');
     case 'scan':return ok('Reevaluando.');
     case 'capital':{const v=+a.v;if(!(v>=20))return no('Mínimo $20');
-      S=fresh(v,S.settings,S.exp);ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Todo reiniciado.`);return ok('Capital fijado.');}
+      S=fresh(v,S.settings,S.exp);ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Todo reiniciado.`);
+      const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
+      if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
     case 'settings':applySettings(a);L(null,'info','Ajustes guardados.');return ok('Ajustes guardados.');
     case 'spawn':{const par=agentById(+a.parentId);if(!par)return no('Elige un padre vivo.');const e=spawnChild(par,a.g||{},a.fund||null,true);return e?no('No se pudo replicar: '+e+'.'):ok('Hijo creado: arrancará en los próximos latidos.');}
     case 'fund':{const ch=kid();if(!ch)return no('No hay hijos.');const par=agentById(ch.parentId);const e=par?fundChild(par,ch,a.amt):'sin padre';return e?no('No se pudo financiar: '+e+'.'):ok(`${ch.name} financiado.`);}
@@ -37,6 +39,7 @@ function applyCmd(c,a){
       return ok(v?`Constitución de ${ch.name} verificada: huella ${ch.constHash} idéntica a la del original.`:`La constitución de ${ch.name} no coincide${ch.status!=='dead'?'; se ha apagado por seguridad':''}.`);}
     case 'prune':{const n=pruneDead(true);return ok(n?`${n} hijo(s) retirado(s); su dinero volvió a la reserva del padre.`:'No hay hijos muertos sin posiciones que retirar.');}
     case 'report':return ok('Informe listo.',{text:report()});
+    case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}
     case 'import':{const o=a.state;if(!valid(o))return no('La copia no es válida.');o.agents.forEach(x=>{delete x._st;});const tok=nset().token;S=migrate(o);if(IS_SERVER&&!nset().token&&tok)nset().token=tok;
       nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;S.lastSeen=Date.now();L(null,'info','Agente cargado desde una copia.');return ok('Copia restaurada.');}
   }
@@ -149,8 +152,10 @@ $('sysBtn').addEventListener('click',async()=>{
     if(n.sys){sysPost('Avisos activados.');tgMsg('Avisos del navegador activados.',true);}else tgMsg('Permiso denegado. Puedes activarlo en los ajustes del sitio en Chrome.',false);}
   catch(e){tgMsg('No se pudieron activar aquí. Usa Telegram.',false);}
 });
-$('bkCopy').addEventListener('click',()=>{save(true);const j=JSON.stringify(S);try{navigator.clipboard.writeText(j).then(()=>{$('bkMsg').textContent='Copia copiada ('+Math.round(j.length/1024)+' KB). Guárdala en tus notas o pégala en el otro dispositivo con "Pegar copia".';},()=>$('expBtn').click());}catch(e){$('expBtn').click();}});
-$('bkTg').addEventListener('click',()=>{save(true);$('bkMsg').textContent=tgBackup()?'Copia enviada a tu Telegram como archivo.':'Primero configura Telegram en "Avisos".';});
+/* copia completa: en modo servidor se pide al servidor (lo que se ve en pantalla es una versión resumida) */
+async function fullState(){if(!REM.on)return S;const r=await act('export');if(!r.ok||!r.state)throw new Error(r.msg||'sin copia');return r.state;}
+$('bkCopy').addEventListener('click',async()=>{save(true);let st;try{st=await fullState();}catch(e){$('bkMsg').textContent='No se pudo traer la copia del servidor: '+e.message+'.';return;}const j=JSON.stringify(st);try{navigator.clipboard.writeText(j).then(()=>{$('bkMsg').textContent='Copia copiada ('+Math.round(j.length/1024)+' KB). Guárdala en tus notas o pégala en el otro dispositivo con "Pegar copia".';},()=>$('expBtn').click());}catch(e){$('expBtn').click();}});
+$('bkTg').addEventListener('click',async()=>{save(true);let st;try{st=await fullState();}catch(e){$('bkMsg').textContent='No se pudo traer la copia del servidor: '+e.message+'.';return;}const cur=S;S=st;const sent=tgBackup();S=cur;$('bkMsg').textContent=sent?'Copia enviada a tu Telegram como archivo.':'Primero configura Telegram en "Avisos".';});
 $('bkFile').addEventListener('change',e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=async()=>{let o=null;try{o=JSON.parse(rd.result);}catch(err){}e.target.value='';
@@ -225,7 +230,7 @@ $('saveSet').addEventListener('click',async()=>{
 window.addEventListener('resize',()=>{if(tab==='stats')renderStats();});
 
 /* copia de seguridad */
-$('expBtn').addEventListener('click',()=>{save(true);const t=$('bk');t.style.display='block';t.value=JSON.stringify(S);t.focus();t.select();$('bkMsg').textContent='Copia lista: cópiala y guárdala en un sitio seguro (notas, correo).';});
+$('expBtn').addEventListener('click',async()=>{save(true);let st;try{st=await fullState();}catch(e){$('bkMsg').textContent='No se pudo traer la copia del servidor: '+e.message+'.';return;}const t=$('bk');t.style.display='block';t.value=JSON.stringify(st);t.focus();t.select();$('bkMsg').textContent='Copia lista: cópiala y guárdala en un sitio seguro (notas, correo).';});
 $('impBtn').addEventListener('click',async()=>{
   const t=$('bk');if(t.style.display==='none'){t.style.display='block';t.value='';t.focus();$('bkMsg').textContent='Pega aquí la copia y vuelve a pulsar "Pegar copia".';return;}
   let o=null;try{o=JSON.parse(t.value);}catch(e){}

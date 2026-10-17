@@ -11,7 +11,8 @@ function agentScan(a,manual){
   if(halted&&a.dayHalt!==a.dayKey){a.dayHalt=a.dayKey;L(a,'tier',`Límite de pérdida diaria alcanzado (${pct(dayLoss(a))} hoy). No abre nuevas operaciones hasta mañana; las abiertas siguen con sus stops.`);}
   if(!manual){
     for(const p of a.positions.slice()){
-      p.bars++;const an=analyze(p.sym,P,p.tf);
+      p.bars++;if(p.capNet>0)continue; /* límite de ganancia del usuario: no se cierra por tiempo, falta de avance ni cruces */
+      const an=analyze(p.sym,P,p.tf);
       const px0=pxFresh(p.sym,90000)?market.price[p.sym]:null,prog=px0?(isShort(p)?p.entry-px0:px0-p.entry)/p.risk:null;
       if(Date.now()>=(p.until||p.openedAt+P.maxHold*TF_MS[S.settings.tf]))closePos(a,p,'tiempo máximo');
       /* sin avance: si tras 16 velas no ha recorrido ni un cuarto del riesgo hacia el objetivo, se cierra para usar el dinero en algo que se mueva */

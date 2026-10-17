@@ -17,6 +17,10 @@ function migrate(s){
   s.agents.forEach(a=>(a.positions||[]).forEach(p=>{if(p.tp0!=null)p.tp=p.tp0;delete p.tp0;delete p.capNet;}));
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
   const ex={};for(const k in s.exp)ex[fx(k)]=s.exp[k];s.exp=ex;
+  /* salidas v2 (una sola vez): trailing más amplio para dejar correr las ganancias */
+  if(!s.settings.exitV2){s.settings.exitV2=1;s.agents.forEach(a=>{if(a.params)a.params.trailATR=Math.max(2,+a.params.trailATR||0);});}
+  /* criptomonedas en Binance Futuros (una sola vez): la experiencia de cada cripto pasa a su contrato */
+  if(s.settings.cryptoFut===undefined){s.settings.cryptoFut=true;for(const k in s.exp)if(k.startsWith('BN:')){const nk='BF:'+k.slice(3),a=s.exp[k],b=s.exp[nk]||{n:0,w:0,pnl:0,sumPct:0};s.exp[nk]={n:a.n+b.n,w:a.w+b.w,pnl:a.pnl+b.pnl,sumPct:(a.sumPct||0)+(b.sumPct||0)};}}
   return s;
 }
 const agentById=id=>S.agents.find(a=>a.id===id);
@@ -108,8 +112,12 @@ function krExit(a){
   if(!krOn()||kset().mode!=='full')return;
   for(const p of a.positions.slice()){
     const e=krEntry(p.sym,p.tf||S.settings.tf);if(!e||e.at<p.openedAt)continue;
-    const sh=isShort(p),dir=sh?-e.r.ret:e.r.ret,agree=sh?1-e.r.up:e.r.up;
-    if(agree<=.25&&dir<-costOf(p.sym))closePos(a,p,`Kronos prevé giro en contra (${pct(dir)})`);
+    const sh=isShort(p),dir=sh?-e.r.ret:e.r.ret,agree=sh?1-e.r.up:e.r.up,px0=market.price[p.sym]||p.entry,fav=p.risk>0?(sh?p.entry-px0:px0-p.entry)/p.risk:0;
+    if(agree<=.25&&dir<-costOf(p.sym)){
+      /* en pérdida corta antes de llegar al stop; en ganancia no vende: asegura el stop en la entrada y deja correr */
+      if(fav<0)closePos(a,p,`Kronos prevé giro en contra (${pct(dir)})`);
+      else if(fav>=.3&&!p.krProt){p.krProt=1;protect(p);L(a,'info',`${base(p.sym)}: Kronos prevé giro en contra; el stop pasa a la entrada para no devolver lo ganado.`);}
+    }
   }
 }
 
@@ -149,10 +157,19 @@ function analyze(sym,P,tf){
   const dtrend=ef[n]<es[n]&&c[n]<es[n],dslope=es[n]<es[n-3],dbrk=c[n]<lo;
   let score=0;if(trend)score+=30;if(slope)score+=10;if(r>=P.rsiMin&&r<=P.rsiMax)score+=20;if(r>=50&&r<=65)score+=5;if(brk)score+=P.wBrk??25;if(vol)score+=P.wVol??10;
   let sScore=0;if(dtrend)sScore+=30;if(dslope)sScore+=10;if(r<=100-P.rsiMin&&r>=100-P.rsiMax)sScore+=20;if(r<=50&&r>=35)sScore+=5;if(dbrk)sScore+=P.wBrk??25;if(vol)sScore+=P.wVol??10;
-  const b={sym,tf,price,last:c[n],rsi:r,atr:a,atrPct:a/price,bearCross:ef[n]<es[n],bullCross:ef[n]>es[n]};
+  const b={sym,tf,price,last:c[n],rsi:r,atr:a,atrPct:a/price,tick:tickOf(k),bearCross:ef[n]<es[n],bullCross:ef[n]>es[n]};
   return Object.assign(b,{side:'long',score,trend,short:Object.assign({},b,{side:'short',score:sScore,trend:dtrend})});
 }
 
+/* paso mínimo de precio estimado con las velas: si es grande respecto al precio, el stop salta con cualquier movimiento */
+function tickOf(k){const v=[];for(const x of k.slice(-60))v.push(x.o,x.h,x.l,x.c);v.sort((a,b)=>a-b);let t=Infinity;for(let i=1;i<v.length;i++){const d=v[i]-v[i-1];if(d>v[i]*1e-9&&d<t)t=d;}return isFinite(t)?t:0;}
+/* tendencia del bitcoin en velas de 1 h: las demás criptos suelen seguirle */
+let btcC={at:0,v:null};
+function btcTrend(P){
+  if(Date.now()-btcC.at<60000)return btcC.v;
+  const k=uni().find(x=>catOf(x)==='Cripto'&&base(x)==='BTC'),an=k&&analyze(k,P,'1h');
+  btcC={at:Date.now(),v:an?(an.trend?'up':an.short.trend?'down':null):null};return btcC.v;
+}
 /* ---------- agente ---------- */
 /* un corto está cubierto al 100 % con capital propio: vale lo aportado más lo que gana si el precio baja */
 const isShort=p=>p.side==='short';
@@ -185,7 +202,15 @@ function sweep(a){
   if(a._vq>=.005&&Date.now()-(a._vt||0)>600000){L(a,'reserve',`A la cartera reservada: +${money(a._vq)} de beneficio (reservado en total ${money(a.vault)}, congelado). El agente sigue operando con su capital de ${money(a.initial)}.`);a._vq=0;a._vt=Date.now();}
 }
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
-function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym);return Math.max(0,posVal(p,price))-f-p.basis;}
+function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym);return Math.max(0,posVal(p,price))-f-p.basis+(p.taken||0);}
+/* toma parcial: vende una parte de la posición y guarda lo ganado; la operación sigue siendo una sola en el historial */
+function partialClose(a,p,frac,why){
+  const sh=isShort(p),price=(market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),q=p.qty*frac,b=p.basis*frac;
+  const f=q*price*feeOf(p.sym),net=Math.max(0,sh?q*(2*p.entry-price):q*price)-f,pnl=net-b;
+  if(!p.basis0)p.basis0=p.basis;if(!p.qty0)p.qty0=p.qty;
+  a.cash+=net;p.qty-=q;p.basis-=b;p.taken=(p.taken||0)+pnl;
+  L(a,'close',`${base(p.sym)}: ${why} · vende la mitad @ ${px(price)} · ${sgn(pnl)} asegurados; el resto sigue con el stop en la entrada`);
+}
 function openPos(a,an,P){
   const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
@@ -202,14 +227,17 @@ function openPos(a,an,P){
 /* user: 'limit' (tu límite de ganancia) o 'manual' (vendida por ti). Esas ventas no cuentan en el aprendizaje del agente:
    van a tu registro aparte, donde se sigue el precio para saber qué habría hecho el plan del agente */
 function closePos(a,p,reason,at,user){
-  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,pnl=net-p.basis;
+  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,b0=p.basis0||p.basis,pnl=net-p.basis+(p.taken||0);
   a.cash+=net;a.positions=a.positions.filter(x=>x!==p);
-  if(!user){const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/p.basis;}
-  a.closed.unshift(Object.assign({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty,pnl,pct:pnl/p.basis,reason,t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0},user?{user}:{}));
+  if(!user){const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/b0;}
+  /* recorrido: cuánto llegó a ir a favor (mfe) y en contra (mae), en múltiplos del riesgo inicial (R) */
+  const R=p.risk>0?(sh?p.entry-price:price-p.entry)/p.risk:null;
+  a.closed.unshift(Object.assign({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty0||p.qty,pnl,pct:pnl/b0,reason:reason+(p.taken?' · con mitad asegurada':''),t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0,
+    mfe:p.mfe!=null?+p.mfe.toFixed(2):null,mae:p.mae!=null?+p.mae.toFixed(2):null,R:R!=null?+R.toFixed(2):null,half:p.taken?1:0},user?{user}:{}));
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0&&!user)a.cooldown[p.sym]=Date.now()+30*60e3;
   if(user)labAdd(a,p,user,price,pnl);
-  L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/p.basis)}) · motivo: ${reason}`);
+  L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/b0)}) · motivo: ${reason}${p.mfe!=null?` · llegó a ir ${p.mfe.toFixed(1)}R a favor`:''}`);
 }
 function checkExits(a){
   if(a.status!=='alive')return;
@@ -226,24 +254,38 @@ function checkExits(a){
     const price=market.price[p.sym],cap=S.settings.capNet;
     /* tu límite de ganancia: en cuanto vender deja esa cantidad limpia, se vende (lo demás sigue igual) */
     if(cap>0&&netIfClose(p,price)>=cap){closePos(a,p,'límite de ganancia '+money(cap),undefined,'limit');continue;}
-    if(isShort(p)){
-      if(price<(p.low||p.entry)){p.low=price;if(p.low<=p.entry-p.risk)p.stop=Math.min(p.stop,p.low+a.params.trailATR*p.atr);}
-      if(price>=p.stop)closePos(a,p,p.stop<p.entry?'trailing':'stop');
-      else if(price<=p.tp)closePos(a,p,'objetivo');
-    }else{
-      if(price>p.high){p.high=price;if(p.high>=p.entry+p.risk)p.stop=Math.max(p.stop,p.high-a.params.trailATR*p.atr);}
-      if(price<=p.stop)closePos(a,p,p.stop>p.entry?'trailing':'stop');
-      else if(price>=p.tp)closePos(a,p,'objetivo');
-    }
+    manage(a,p,price);
   }
 }
+/* ---------- salidas: cortar las pérdidas pronto y dejar correr las ganancias ----------
+   1) El stop inicial no se mueve en contra. 2) A +1R (lo arriesgado) vende la mitad y sube el stop a la entrada:
+   desde ahí la operación ya no puede perder. 3) A partir de +1,5R el stop sigue al precio a distancia amplia (trailing).
+   4) Al llegar al objetivo no vende: lo deja correr con el stop a 1 ATR del mejor precio. */
+const beOf=p=>p.entry*(isShort(p)?1-costOf(p.sym):1+costOf(p.sym));
+function manage(a,p,price){
+  const sh=isShort(p),fav=p.risk>0?(sh?p.entry-price:price-p.entry)/p.risk:0;
+  p.mfe=Math.max(p.mfe||0,fav);p.mae=Math.min(p.mae||0,fav);
+  if(sh?price>=p.stop:price<=p.stop){
+    const be=beOf(p),atBE=p.half&&Math.abs(p.stop-be)<=p.entry*1e-6,win=sh?p.stop<p.entry:p.stop>p.entry;
+    closePos(a,p,atBE?'stop en la entrada':win?(p.runner?'objetivo superado y trailing':'trailing'):'stop');return;
+  }
+  if(!p.half&&fav>=1){
+    if(p.qty*price*.5>=MIN_NOTIONAL)partialClose(a,p,.5,'+1R alcanzado');
+    p.half=true;const be=beOf(p);p.stop=sh?Math.min(p.stop,be):Math.max(p.stop,be);
+  }
+  if(sh){if(price<(p.low||p.entry))p.low=price;}else if(price>(p.high||p.entry))p.high=price;
+  if(!p.runner&&(sh?price<=p.tp:price>=p.tp)){p.runner=true;L(a,'info',`${base(p.sym)} llega a su objetivo: no vende, lo deja correr con el stop ajustado.`);}
+  if(fav>=1.5||p.runner){const d=(p.runner?1:a.params.trailATR)*p.atr;p.stop=sh?Math.min(p.stop,p.low+d):Math.max(p.stop,p.high-d);}
+}
+/* protege una posición en ganancia: lleva el stop al menos a la entrada */
+function protect(p){if(!p.risk)return;const be=beOf(p);p.stop=isShort(p)?Math.min(p.stop,be):Math.max(p.stop,be);}
 /* ---------- tu registro (ventas con límite y ventas manuales) ----------
    No cambia las reglas del agente. Guarda cada venta tuya con su contexto y sigue el precio después para saber qué habría
    hecho el plan del agente (su stop, su objetivo con trailing y su tiempo máximo). Así se puede revisar si te compensa. */
 const labOf=()=>S.lab||(S.lab={list:[]});
 function labAdd(a,p,kind,price,pnl){
   const now=Date.now(),mk=market.price[p.sym]||price,sh=isShort(p),span=sh?p.entry-p.tp:p.tp-p.entry;
-  labOf().list.unshift({kind,limit:kind==='limit'?S.settings.capNet:null,ag:a.name,sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,qty:p.qty,basis:p.basis,
+  labOf().list.unshift({kind,limit:kind==='limit'?S.settings.capNet:null,ag:a.name,sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,qty:p.qty,basis:p.basis,taken:p.taken||0,
     t0:p.openedAt,t1:now,exit:price,pnl,prog:span>0?+(((sh?p.entry-mk:mk-p.entry)/span).toFixed(3)):null,
     w:{stop:p.stop,tp:p.tp,until:p.until||now+6*3600e3,high:Math.max(p.high||p.entry,mk),low:Math.min(p.low||p.entry,mk),risk:p.risk,atr:p.atr,trail:a.params.trailATR,last:mk,seen:now},cf:null});
   if(S.lab.list.length>300)S.lab.list.length=300;
@@ -287,12 +329,14 @@ function decide(a,an,P,T,pre){
   if(an.score+x.adj+ed.adj<P.minScore)return `puntuación ${an.score}${x.adj?(x.adj>0?'+':'')+x.adj+' por experiencia':''}${ed.adj?(ed.adj>0?'+':'')+ed.adj+' por resultados recientes ('+ed.why+')':''} < ${P.minScore}`;
   if(an.atrPct<.002)return 'volatilidad demasiado baja para cubrir comisiones';
   if(an.atrPct>.06)return 'volatilidad excesiva';
-  if(P.tpATR*an.atrPct<.006)return 'objetivo no cubre los costes';
+  if(P.tpATR*an.atrPct<Math.max(.006,3*costOf(an.sym)))return 'objetivo no cubre los costes (pide 3 veces la comisión)';
+  if(an.tick&&(an.tick/an.price>.0008||P.stopATR*an.atr<8*an.tick))return `precio a saltos demasiado grandes (paso ${px(an.tick)})`;
+  if(catOf(an.sym)==='Cripto'&&base(an.sym)!=='BTC'){const bt=btcTrend(P);if(bt&&((sh&&bt==='up')||(!sh&&bt==='down')))return `contra la tendencia del bitcoin (${bt==='up'?'alcista':'bajista'})`;}
   if(sh?an.price<an.last-an.atr:an.price>an.last+an.atr)return 'el precio ya se escapó de la señal';
   if((a.cooldown[an.sym]||0)>Date.now())return 'en espera tras una pérdida reciente';
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
-  {const lim=Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75));if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
-  if(a.positions.some(p=>p.sym===an.sym))return 'ya en cartera';
+  {const lim=Math.min(4,Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75)));if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
+  if(a.positions.some(p=>p.sym===an.sym||(catOf(p.sym)==='Cripto'&&catOf(an.sym)==='Cripto'&&base(p.sym)===base(an.sym))))return 'ya en cartera';
   if(!pre&&krOn()){
     const f=krOf(an.sym,an.tf);
     if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}

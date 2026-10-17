@@ -63,11 +63,13 @@ try{if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serv
 /* ---------- interfaz ---------- */
 let tab='panel';
 function updateHero(){
-  const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a),0),op=ags.reduce((t,a)=>t+a.cash,0);
+  const ags=S.agents,vault=ags.reduce((t,a)=>t+(a.vault||0),0),tot=ags.reduce((t,a)=>t+eq(a),0)+vault,op=ags.reduce((t,a)=>t+a.cash,0);
   const npos=ags.reduce((t,a)=>t+a.positions.length,0),pl=tot-S.initial;
   $('hTotal').textContent=money(tot);
   const el=$('hPnl');el.className='pnl '+(pl>=0?'up':'down');
   el.textContent=`${pl>=0?'▲':'▼'} ${sgn(pl)} (${pct(pl/S.initial)}) sobre ${money(S.initial)}`;
+  if(!document.getElementById('hVault'))el.insertAdjacentHTML('afterend','<div id="hVault" class="pnl" style="font-size:12.5px;color:var(--money);margin-top:2px" hidden></div>');
+  {const hv=$('hVault');hv.hidden=!(vault>=.005);if(vault>=.005)hv.textContent=`🔒 Reservado ${money(vault)} · congelado`;}
   $('tOp').textContent=money(op);$('tRes').textContent=String(npos);
   $('tLossL').textContent=pl>=0?'Ganado':'Perdido';
   const le=$('tLoss');le.textContent=money(Math.abs(pl));le.className=pl>=0?'up':'down';
@@ -109,12 +111,13 @@ function renderMode(){
   const box=$('modeDrop');box.hidden=!modeOpen;if(!modeOpen)return;
   const ae=document.activeElement;if(ae&&ae.id==='capIn2')return; /* no se redibuja mientras escribes */
   const lim=modeLim||!!cap,s=labSum('limit'),m=labSum('manual');
-  const line=(t,x)=>x.n?`<div><b>${t}:</b> ${x.n} venta${x.n>1?'s':''}, <span class="${x.pnl>=0?'up':'down'}">${sgn(x.pnl)}</span>${x.done?` · el plan del agente habría dado <span class="${x.plan>=0?'up':'down'}">${sgn(x.plan)}</span> en las ${x.done} ya comparadas → <b class="${x.diff>=0?'up':'down'}">${x.diff>=0?'ganas':'pierdes'} ${money(Math.abs(x.diff))}</b>`:''}${x.pend?` · ${x.pend} en seguimiento`:''}</div>`:'';
+  const line=(t,x)=>x.n?`<div><b>${t}:</b> ${x.n} venta${x.n>1?'s':''}, <span class="${x.pnl>=0?'up':'down'}">${sgn(x.pnl)}</span>${x.done?` · en las ${x.done} ya comparadas: tú <span class="${x.you>=0?'up':'down'}">${sgn(x.you)}</span>, el plan del agente <span class="${x.plan>=0?'up':'down'}">${sgn(x.plan)}</span> → <b class="${x.diff>=0?'up':'down'}">${x.diff>=0?'ganas':'pierdes'} ${money(Math.abs(x.diff))}</b>`:''}${x.pend?` · ${x.pend} en seguimiento`:''}</div>`:'';
   box.innerHTML=`<div class="seg"><button class="btn" type="button" data-m="auto" aria-pressed="${!lim}">Automático</button><button class="btn" type="button" data-m="lim" aria-pressed="${lim}">Límite de ganancia</button></div>
     ${lim?`<div class="step"><button class="btn" type="button" data-d="-1" aria-label="Bajar un céntimo">−</button><input id="capIn2" type="number" inputmode="decimal" step="0.01" min="0.01" value="${cap?cap.toFixed(2):''}" placeholder="0.10" aria-label="Ganancia limpia por operación, en dólares"><button class="btn" type="button" data-d="1" aria-label="Subir un céntimo">+</button></div>
     <div class="pre">${[.05,.1,.15,.2,.5,1].map(v=>`<button class="btn" type="button" data-v="${v}">${c2(v)}</button>`).join('')}</div>
-    <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
+    <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual. Lo que gane por encima de su capital (${money(S.agents[0].initial)}) pasa a la cartera reservada, congelada.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
     '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
+    ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total.</div>`:''}
     <div class="lab"><div class="lbl" style="margin-bottom:4px">Tu registro · no cambia el aprendizaje del agente</div>${line('Con límite',s)+line('Ventas manuales',m)||'<div class="note">Aquí se irán guardando las ventas hechas con tu límite o a mano, y lo que habría pasado con el plan del agente, para ver si te compensa.</div>'}</div>`;
 }
 $('tMode').addEventListener('click',()=>{modeOpen=!modeOpen;if(!modeOpen)modeLim=false;renderMode();});
@@ -294,7 +297,7 @@ function renderLin(){
     const ib=(a.inbox||[]).slice(0,3).map(m=>`<div>${clock(m.t)} · <b>${esc(m.from)}</b>: ${esc(m.text)}</div>`).join('');
     return `<div class="card agent"><div class="row" style="justify-content:space-between"><h3>${esc(a.name)}</h3><span class="row" style="gap:6px"><span class="chip ${lc}">${LIFE_LAB[life]}</span>${a.status==='alive'?`<span class="chip ${a.tier}">${a.tier.replace('_',' ')}</span>`:''}</span></div>
     <div class="note">Generación ${a.gen}${par?' · hijo de '+esc(par.name):' · agente original'} · nació ${clock(a.born)}${kids.length?` · ${kids.filter(k=>k.status!=='dead').length} hijo(s) vivo(s) de ${kids.length}`:''}</div>
-    <div class="meta"><span>Especialidad: ${esc(a.spec||'Todo')}</span><span>Capital: ${money(a.initial)}</span><span>Operativo: ${money(eq(a))}</span>${par&&a.swept>0?`<span>Enviado al padre: ${money(a.swept)}</span>`:''}<span class="${s.ret>=0?'up':'down'}">Resultado: ${pct(s.ret)}</span><span>Operaciones: ${s.n}</span><span>Aciertos: ${s.n?(s.hit*100).toFixed(0)+'%':'—'}</span></div>
+    <div class="meta"><span>Especialidad: ${esc(a.spec||'Todo')}</span><span>Capital: ${money(a.initial)}</span><span>Operativo: ${money(eq(a))}</span>${a.vault>=.005?`<span>Reservado: ${money(a.vault)}</span>`:''}${par&&a.swept>0?`<span>Enviado al padre: ${money(a.swept)}</span>`:''}<span class="${s.ret>=0?'up':'down'}">Resultado: ${pct(s.ret)}</span><span>Operaciones: ${s.n}</span><span>Aciertos: ${s.n?(s.hit*100).toFixed(0)+'%':'—'}</span></div>
     <div class="note" style="margin-top:6px">Constitución: <span class="${ok?'up':'down'}">${ok?'verificada':'sin verificar'}</span>${a.health?` · Salud: ${esc(a.health.why)} (${clock(a.health.at)})`:''}${a.recTries?` · reinicios: ${a.recTries}`:''}</div>
     ${a.genesis&&a.genesis.msg?`<div class="note" style="margin-top:6px">Génesis: «${esc(a.genesis.msg)}»</div>`:''}
     <div class="note" style="margin-top:8px;font-family:var(--mono)">EMA ${a.params.emaF}/${a.params.emaS} · riesgo ${(a.params.riskPct*100).toFixed(2)}% · stop ${(+a.params.stopATR).toFixed(2)}×ATR · objetivo ${(+a.params.tpATR).toFixed(2)}×ATR · RSI ${Math.round(a.params.rsiMin)}–${Math.round(a.params.rsiMax)}</div>

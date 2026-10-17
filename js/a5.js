@@ -32,7 +32,7 @@ function applyCmd(c,a){
          los parámetros que ha ido afinando el agente original, el cementerio y un resumen de cada etapa anterior */
       const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x)+x.reserve,0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
-      S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);
+      S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
       S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
@@ -45,6 +45,7 @@ function applyCmd(c,a){
       return ok(v?`Constitución de ${ch.name} verificada: huella ${ch.constHash} idéntica a la del original.`:`La constitución de ${ch.name} no coincide${ch.status!=='dead'?'; se ha apagado por seguridad':''}.`);}
     case 'prune':{const n=pruneDead(true);return ok(n?`${n} hijo(s) retirado(s); su dinero volvió a la reserva del padre.`:'No hay hijos muertos sin posiciones que retirar.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
+    case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}
     case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}
     case 'import':{const o=a.state;if(!valid(o))return no('La copia no es válida.');o.agents.forEach(x=>{delete x._st;});const tok=nset().token;S=migrate(o);if(IS_SERVER&&!nset().token&&tok)nset().token=tok;
       nextScan=0;market.uniAt=0;ui.radar=[];ui.summary='';ui.scanAt=0;S.lastSeen=Date.now();L(null,'info','Agente cargado desde una copia.');return ok('Copia restaurada.');}
@@ -53,8 +54,8 @@ function applyCmd(c,a){
 }
 /* informe con las etapas anteriores (cada vez que se reinició el saldo) */
 function reportFull(){
-  const r=S.runs||[];if(!r.length)return report();
-  return report()+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
+  const r=S.runs||[],ev=evoReport();if(!r.length)return report()+ev;
+  return report()+ev+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
 }
 /* ejecuta una orden: aquí, o en el servidor si este dispositivo lo está mirando */
 async function act(c,a){

@@ -5,6 +5,9 @@ function migrate(s){
   if(s.settings.shorts===undefined)s.settings.shorts=true;
   if(!s.settings.kronos)s.settings.kronos={url:'',mode:'off'};
   if(!s.exp)s.exp={};
+  /* versión «máximas operaciones simultáneas»: hasta 12 posiciones de ~8 % cada una y 40 criptos vigiladas (una sola vez) */
+  if(!s.settings.maxOpenV){s.settings.maxOpenV=1;s.settings.universe=Math.max(s.settings.universe||20,40);
+    (s.agents||[]).forEach(a=>{if(a.params){a.params.maxPos=Math.max(a.params.maxPos||4,12);a.params.maxPosPct=Math.min(a.params.maxPosPct||.25,.08);}});}
   s.agents=s.agents.map(a=>{const n=newAgent(a);if(!a.life)n.life=a.status==='dead'?'dead':'alive';if(!a.constitution){n.constitution=CONSTITUTION;n.constHash=CONST_HASH;}if(!a.spec)n.spec='Todo';return n;});
   const fx=k=>k.includes(':')?k:'BN:'+k;
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
@@ -179,7 +182,8 @@ function openPos(a,an,P){
   const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
   let qty=(e*P.riskPct*T.risk)/stopDist;
-  qty=Math.min(qty,(e*P.maxPosPct)/entry,a.cash/(entry*(1+fee)));
+  /* con poco capital, cada posición puede llegar al mínimo de $5 aunque supere el % máximo */
+  qty=Math.min(Math.max(qty,MIN_NOTIONAL*1.01/entry),Math.max(e*P.maxPosPct,MIN_NOTIONAL*1.01)/entry,a.cash/(entry*(1+fee)));
   if(qty*entry<MIN_NOTIONAL)return 'capital insuficiente para el tamaño mínimo ($5)';
   const cost=qty*entry,f=cost*fee;a.cash-=cost+f;
   const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr,risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
@@ -238,7 +242,7 @@ function decide(a,an,P,T,pre){
   if(sh?an.price<an.last-an.atr:an.price>an.last+an.atr)return 'el precio ya se escapó de la señal';
   if((a.cooldown[an.sym]||0)>Date.now())return 'en espera tras una pérdida reciente';
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
-  if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=2)return 'ya tiene dos criptomonedas en la misma dirección';
+  {const lim=Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)/2));if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
   if(a.positions.some(p=>p.sym===an.sym))return 'ya en cartera';
   if(!pre&&krOn()){
     const f=krOf(an.sym,an.tf);

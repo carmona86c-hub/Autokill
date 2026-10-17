@@ -1,7 +1,7 @@
 'use strict';
 const LS='automaton.app.real.v1';
-const DEF_PARAMS={riskPct:.01,maxPosPct:.25,maxPos:4,emaF:9,emaS:21,rsiMin:45,rsiMax:70,stopATR:1.5,tpATR:3,trailATR:1.2,minScore:60,maxHold:48};
-const BOUNDS={riskPct:[.002,.03],maxPosPct:[.08,.4],maxPos:[1,6],emaF:[5,15],emaS:[16,40],rsiMin:[35,55],rsiMax:[62,80],stopATR:[.8,3],tpATR:[1.5,6],trailATR:[.6,3],minScore:[50,80],maxHold:[12,120]};
+const DEF_PARAMS={riskPct:.01,maxPosPct:.08,maxPos:12,emaF:9,emaS:21,rsiMin:45,rsiMax:70,stopATR:1.5,tpATR:3,trailATR:1.2,minScore:60,maxHold:48};
+const BOUNDS={riskPct:[.002,.03],maxPosPct:[.04,.4],maxPos:[1,20],emaF:[5,15],emaS:[16,40],rsiMin:[35,55],rsiMax:[62,80],stopATR:[.8,3],tpATR:[1.5,6],trailATR:[.6,3],minScore:[50,80],maxHold:[12,120]};
 const PLABEL={riskPct:'Riesgo por operación',maxPosPct:'Máx. por posición',maxPos:'Posiciones máximas',emaF:'EMA rápida',emaS:'EMA lenta',rsiMin:'RSI mínimo',rsiMax:'RSI máximo',stopATR:'Stop (× ATR)',tpATR:'Objetivo (× ATR)',trailATR:'Trailing (× ATR)',minScore:'Puntuación mínima',maxHold:'Velas máx. en posición'};
 const INTS=new Set(['maxPos','emaF','emaS','minScore','maxHold']);
 const MIN_NOTIONAL=5;
@@ -237,7 +237,7 @@ function newAgent(o){return Object.assign({id:0,name:'Automaton',gen:0,parentId:
 function fresh(capital,settings,exp){
   return {v:1,initial:capital,startedAt:Date.now(),lastSeen:Date.now(),running:true,nextId:1,
     agents:[newAgent({initial:capital,cash:capital,peak:capital,constitution:CONSTITUTION,constHash:CONST_HASH})],log:[],exp:exp||{},
-    settings:settings||{fee:.001,slip:.0005,universe:20,tf:'5m',repl:true,maxKids:3,shorts:true,markets:{BN:true,BF:true,HL:true},kronos:{url:'',mode:'off'}}};
+    settings:settings||{fee:.001,slip:.0005,universe:40,maxOpenV:1,tf:'5m',repl:true,maxKids:3,shorts:true,markets:{BN:true,BF:true,HL:true},kronos:{url:'',mode:'off'}}};
 }
 function valid(s){return s&&s.v===1&&Array.isArray(s.agents)&&s.agents.length&&s.settings;}
 function readLS(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(r);if(valid(s))return s;}}catch(e){}return null;}

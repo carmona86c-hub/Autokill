@@ -9,6 +9,9 @@ function migrate(s){
   if(!s.settings.maxOpenV){s.settings.maxOpenV=1;s.settings.universe=Math.max(s.settings.universe||20,40);
     (s.agents||[]).forEach(a=>{if(a.params){a.params.maxPos=Math.max(a.params.maxPos||4,12);a.params.maxPosPct=Math.min(a.params.maxPosPct||.25,.08);}});}
   s.agents=s.agents.map(a=>{const n=newAgent(a);n.params=Object.assign({},DEF_PARAMS,a.params||{});if(!a.life)n.life=a.status==='dead'?'dead':'alive';if(!a.constitution){n.constitution=CONSTITUTION;n.constHash=CONST_HASH;}if(!a.spec)n.spec='Todo';return n;});
+  /* sin reserva: lo apartado vuelve al capital con el que opera cada agente (una sola vez) */
+  if(!s.settings.noResV){s.settings.noResV=1;s.agents.forEach(a=>{const r=a.reserve||0,d=r-(a.parentId==null?(a.swept||0):0);a.cash+=r;a.reserve=0;if(a.parentId==null)a.swept=0;
+    if(d){a.initial=Math.max(1,a.initial+d);a.peak+=d;if(a.dayStart)a.dayStart+=d;a.hist=(a.hist||[]).map(([t,v])=>[t,v+d]);}if(!a.seed)a.seed=a.initial;});}
   const fx=k=>k.includes(':')?k:'BN:'+k;
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
   const ex={};for(const k in s.exp)ex[fx(k)]=s.exp[k];s.exp=ex;
@@ -36,11 +39,11 @@ function notifyEvt(type,msg){
   nq.l.push((type==='open'?'🟢 ':type==='close'?'🔵 ':'⚠️ ')+msg);
   clearTimeout(nq.t);nq.t=setTimeout(()=>{const txt=nq.l.slice(0,12).join('\n');nq.l=[];tgPost(txt);sysPost(txt);},4000);
 }
-function totals(){const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a)+a.reserve,0);return {tot,res:ags.reduce((t,a)=>t+a.reserve,0),pl:tot-S.initial,open:ags.reduce((t,a)=>t+a.positions.length,0),alive:alive().length};}
+function totals(){const ags=S.agents,tot=ags.reduce((t,a)=>t+eq(a),0);return {tot,pl:tot-S.initial,open:ags.reduce((t,a)=>t+a.positions.length,0),alive:alive().length};}
 function dailyText(){
   const t=totals(),d0=new Date();d0.setHours(0,0,0,0);
   const today=S.agents.flatMap(a=>a.closed).filter(x=>x.t1>=d0.getTime()),pt=today.reduce((s,x)=>s+x.pnl,0),w=today.filter(x=>x.pnl>0).length;
-  return `📊 Resumen Automaton ${new Date().toLocaleDateString('es-ES')}${S.settings.device?' · '+S.settings.device:''}\nPatrimonio: ${money(t.tot)} (${sgn(t.pl)}, ${pct(t.pl/S.initial)})\nHoy: ${today.length} operaciones, ${w} ganadoras, ${sgn(pt)}\nReserva: ${money(t.res)} · Posiciones abiertas: ${t.open} · Agentes vivos: ${t.alive}`;
+  return `📊 Resumen Automaton ${new Date().toLocaleDateString('es-ES')}${S.settings.device?' · '+S.settings.device:''}\nPatrimonio: ${money(t.tot)} (${sgn(t.pl)}, ${pct(t.pl/S.initial)})\nHoy: ${today.length} operaciones, ${w} ganadoras, ${sgn(pt)}\nPosiciones abiertas: ${t.open} · Agentes vivos: ${t.alive}`;
 }
 function tgBackup(){
   if(!tgReady())return false;const fd=new FormData(),day=new Date().toISOString().slice(0,10);
@@ -115,7 +118,7 @@ function report(){
   const ex=Object.entries(S.exp).filter(([,e])=>e.n>=2).sort((a,b)=>b[1].pnl-a[1].pnl),fmtE=([k,e])=>`${base(k)} ${e.n} ops ${Math.round(e.w/e.n*100)}% ${sgn(e.pnl)}`;
   const st=S.settings;
   return [`INFORME AUTOMATON · ${new Date().toLocaleString('es-ES')}${st.device?' · '+st.device:''}`,
-  `Funcionando desde ${new Date(S.startedAt).toLocaleString('es-ES')} · capital ${money(S.initial)} · patrimonio ${money(t.tot)} · resultado ${sgn(t.pl)} (${pct(t.pl/S.initial)}) · reserva ${money(t.res)}`,
+  `Funcionando desde ${new Date(S.startedAt).toLocaleString('es-ES')} · capital ${money(S.initial)} · patrimonio ${money(t.tot)} · resultado ${sgn(t.pl)} (${pct(t.pl/S.initial)})`,
   `Ajustes: velas ${tfs().join('+')} · comisión ${(st.fee*100).toFixed(3)}% · deslizamiento ${(st.slip*100).toFixed(3)}% · cortos ${st.shorts?'sí':'no'} · mercados ${['BN','BF','HL'].filter(x=>st.markets[x]).map(x=>SRCNAME[x]).join(', ')}`,
   `AGENTES`,...S.agents.map(a=>{const s=stats(a),P=a.params;return `  ${a.name} gen${a.gen} ${a.status}/${a.tier} · ${pct(s.ret)} · ${s.n} ops ${s.n?Math.round(s.hit*100)+'%':''} · PF ${s.n?(isFinite(s.pf)?s.pf.toFixed(2):'∞'):'—'} · caída máx ${(s.dd*100).toFixed(1)}% · EMA ${P.emaF}/${P.emaS} riesgo ${(P.riskPct*100).toFixed(2)}% stop ${(+P.stopATR).toFixed(2)} obj ${(+P.tpATR).toFixed(2)} trail ${(+P.trailATR).toFixed(2)} RSI ${Math.round(P.rsiMin)}-${Math.round(P.rsiMax)} min ${P.minScore}`;}),
   `POR TIPO DE MERCADO`,grp(x=>catOf(x.sym)),`AL ALZA / A LA BAJA`,grp(x=>x.side==='short'?'corto':'largo'),`POR VELAS`,grp(x=>x.tf||'?'),`CON / SIN KRONOS`,grp(x=>x.kr?'con Kronos':'sin Kronos'),`POR MOTIVO DE SALIDA`,grp(x=>x.reason),
@@ -171,13 +174,8 @@ function kill(a,why){
   if(a.life!=='dead')lifeEvt(a,'dead',why||'sin fondos operativos');
   L(a,'dead',why?`${a.name} se apaga: ${why}.`:`Sin fondos operativos. ${a.name} se apaga con ${money(a.cash)} sin usar.`);
 }
-/* solo se aparta beneficio ya realizado (ventas cerradas), no ganancias latentes */
-function sweep(a){
-  const e=a.cash+a.positions.reduce((t,p)=>t+p.basis,0);if(e<=a.initial+.005)return;
-  const x=Math.min(a.cash,e-a.initial);if(x<=.01)return;
-  a.cash-=x;a.swept+=x;const dest=a.parentId!=null?agentById(a.parentId):a;dest.reserve+=x;
-  L(a,'reserve',`Beneficio apartado: ${money(x)} a la reserva${dest!==a?' de '+dest.name:''}. Sigue operando con ${money(a.initial)}.`);
-}
+/* sin reserva: el beneficio se queda en el capital con el que opera (interés compuesto) */
+function sweep(a){}
 function openPos(a,an,P){
   const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;

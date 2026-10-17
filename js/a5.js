@@ -44,12 +44,12 @@ function applyCmd(c,a){
     case 'verify':{const ch=kid();if(!ch)return no('No hay hijos.');const v=verifyConst(ch);if(!v&&ch.status==='alive')kill(ch,'constitución alterada: el hijo se apaga por seguridad');
       return ok(v?`Constitución de ${ch.name} verificada: huella ${ch.constHash} idéntica a la del original.`:`La constitución de ${ch.name} no coincide${ch.status!=='dead'?'; se ha apagado por seguridad':''}.`);}
     case 'prune':{const n=pruneDead(true);return ok(n?`${n} hijo(s) retirado(s); su dinero volvió al capital del padre.`:'No hay hijos muertos sin posiciones que retirar.');}
-    case 'poscap':{let ag=null,p=null;S.agents.forEach(x=>x.positions.forEach(q=>{if(q.sym===a.sym&&String(q.openedAt)===String(a.t)){ag=x;p=q;}}));
-      if(!p)return no('Esa posición ya no está abierta.');const v=+a.net;
-      if(a.net===null||a.net===''||!(v>0))p.capNet=null;else{if(v>p.basis*3)return no('Ese límite es demasiado alto para lo invertido en esta posición.');p.capNet=+v.toFixed(4);}
-      if(p.tp0==null)p.tp0=p.tp;p.tp=capTp(p);
-      L(ag,'info',p.capNet?`Límite de ganancia en ${base(p.sym)}: no se vende hasta ganar ${money(p.capNet)} limpios (tras comisiones), a ${px(p.tp)}. El stop no cambia.`:`Límite de ${base(p.sym)} quitado: vuelve al objetivo del agente (${px(p.tp)}).`);
-      checkExits(ag);return ok(p.capNet?'Límite aplicado.':'Límite quitado.');}
+    case 'possell':{let ag=null,p=null;S.agents.forEach(x=>x.positions.forEach(q=>{if(q.sym===a.sym&&String(q.openedAt)===String(a.t)){ag=x;p=q;}}));
+      if(!p)return no('Esa posición ya no está abierta.');
+      if(!sessOpen(sessOf(p.sym),Date.now()))return no('Ese mercado está cerrado ahora: no se puede vender hasta que abra.');
+      if(!pxFresh(p.sym,90000))return no('No hay precio actual de '+base(p.sym)+' ahora mismo; prueba en unos segundos.');
+      const n0=ag.closed.length;closePos(ag,p,'venta manual');const t=ag.closed.length>n0?ag.closed[0]:null;
+      return ok(t?`Vendido ${base(p.sym)} a ${px(t.exit)}: ${sgn(t.pnl)} limpios.`:'Vendido.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}
     case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}

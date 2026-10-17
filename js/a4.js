@@ -105,14 +105,48 @@ function renderPanel(){
     const price=market.price[p.sym]||p.entry,dir=isShort(p)?-1:1,pnl=dir*(price-p.entry)*p.qty,pp=dir*(price-p.entry)/p.entry;
     const pos=Math.max(0,Math.min(1,(price-p.stop)/(p.tp-p.stop)))*100;
     return `<div class="pos"><div class="h"><span>${esc(base(p.sym))} <span class="side ${isShort(p)?'s':'l'}">${isShort(p)?'corto':'largo'}</span> <span class="note">${catOf(p.sym)}${S.agents.length>1?' · '+esc(a.name):''}</span></span><span class="mono ${pnl>=0?'up':'down'}">${sgn(pnl)} · ${pct(pp)}</span></div>
-      <div class="bar"><i style="left:${pos}%"></i></div>
+      ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${esc(p.sym)}|${p.openedAt}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
       <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div></div>`;}).join(''):
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
+  document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const [sym,t]=cv.dataset.k.split('|');const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);if(it)drawPos(cv,it[1]);});
   renderMarkets();renderQuotes();
   const mp=S.agents[0].params.minScore;
   $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
   $('scanInfo').textContent=ui.scanAt?`${ui.summary}.${ui.reasons?' Por qué no compra el resto: '+ui.reasons+'.':''} Última evaluación ${clock(ui.scanAt)}.`:(market.err?`Sin conexión con el mercado (${market.err}). Reintentando.`:'Conectando con el mercado real…');
+}
+/* gráfico real de cada posición: velas del activo en su escala, con la entrada, el stop y el objetivo */
+function posCandles(p){
+  const tf=p.tf||S.settings.tf,k=kOf(tf,p.sym)||((market.kpos||{})[p.sym+'|'+tf])||[];
+  const c=k.slice(-60).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c}));if(!c.length)return c;
+  const price=market.price[p.sym],ms=TF_MS[tf]||9e5,last=c[c.length-1];
+  if(price>0){if(Date.now()>=last.t+ms)c.push({t:last.t+ms*Math.floor((Date.now()-last.t)/ms),o:last.c,h:Math.max(last.c,price),l:Math.min(last.c,price),c:price});
+    else{last.c=price;last.h=Math.max(last.h,price);last.l=Math.min(last.l,price);}}
+  return c.slice(-60);
+}
+function drawPos(cv,p){
+  const c=posCandles(p),dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||c.length<5)return;
+  cv.width=w*dpr;cv.height=h*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);
+  const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim(),up=col('--up'),dn=col('--down'),mu=col('--mute'),ln=col('--line');
+  let lo=Math.min(...c.map(x=>x.l),p.stop,p.tp,p.entry),hi=Math.max(...c.map(x=>x.h),p.stop,p.tp,p.entry);const pad=(hi-lo)*.06||hi*.001;lo-=pad;hi+=pad;
+  const R=74,W=w-R,n=c.length,step=W/n,bw=Math.max(1,Math.min(8,step*.65)),Y=v=>4+(hi-v)/(hi-lo)*(h-18),X=i=>i*step+step/2;
+  g.font='10px '+col('--mono');g.textBaseline='middle';
+  /* velas */
+  c.forEach((x,i)=>{const cl=x.c>=x.o?up:dn;g.strokeStyle=cl;g.fillStyle=cl;g.lineWidth=1;
+    g.beginPath();g.moveTo(Math.round(X(i))+.5,Y(x.h));g.lineTo(Math.round(X(i))+.5,Y(x.l));g.stroke();
+    const y1=Y(Math.max(x.o,x.c)),y2=Y(Math.min(x.o,x.c));g.fillRect(X(i)-bw/2,y1,bw,Math.max(1,y2-y1));});
+  /* momento de la entrada */
+  const t0=c[0].t,t1=c[n-1].t,ei=t1>t0?(p.openedAt-t0)/(t1-t0)*(n-1):-1;
+  if(ei>=0&&ei<=n-1){g.strokeStyle=mu;g.setLineDash([2,3]);g.beginPath();g.moveTo(X(ei),4);g.lineTo(X(ei),h-14);g.stroke();g.setLineDash([]);}
+  /* niveles: objetivo, entrada, stop y precio actual, con su etiqueta a la derecha */
+  const lab=[],lvl=(v,cl,txt,dash)=>{g.strokeStyle=cl;g.setLineDash(dash);g.beginPath();g.moveTo(0,Y(v));g.lineTo(W,Y(v));g.stroke();g.setLineDash([]);lab.push({y:Y(v),cl,txt});};
+  lvl(p.tp,up,'obj '+px(p.tp),[5,4]);lvl(p.entry,mu,'ent '+px(p.entry),[2,3]);lvl(p.stop,dn,'stop '+px(p.stop),[5,4]);
+  const price=c[n-1].c;lab.push({y:Y(price),cl:col('--fg'),txt:px(price),now:1});
+  lab.sort((a,b)=>a.y-b.y);for(let i=1;i<lab.length;i++)if(lab[i].y-lab[i-1].y<12)lab[i].y=lab[i-1].y+12;
+  lab.forEach(l=>{g.fillStyle=l.cl;if(l.now){g.fillRect(W+1,l.y-6,R-2,12);g.fillStyle=col('--panel');}g.textAlign='left';g.fillText(l.txt,W+3,l.y);});
+  g.strokeStyle=ln;g.beginPath();g.moveTo(0,h-13.5);g.lineTo(W,h-13.5);g.stroke();
+  const tfm=t=>new Date(t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+  g.fillStyle=mu;g.textAlign='left';g.fillText(tfm(t0),0,h-6);g.textAlign='right';g.fillText(tfm(t1)+' · velas '+(p.tf||S.settings.tf),W,h-6);
 }
 function renderQuotes(){
   if(!$('quotesBox').open)return;

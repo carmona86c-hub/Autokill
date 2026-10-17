@@ -68,12 +68,12 @@ async function uniBN(){
   const t=await jget('/api/v3/ticker/24hr');
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
-  market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume};setPx(k,+x.lastPrice);return k;});
+  market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
   ok('BN');
 }
 async function uniBF(){
   const [info,t24]=await Promise.all([fget(FAPI+'/fapi/v1/exchangeInfo'),fget(FAPI+'/fapi/v1/ticker/24hr')]);
-  const vol={};t24.forEach(x=>vol[x.symbol]=[+x.quoteVolume,+x.lastPrice]);
+  const vol={};t24.forEach(x=>vol[x.symbol]=[+x.quoteVolume,+x.lastPrice,+x.openPrice||0]);
   const out=[];
   info.symbols.forEach(x=>{
     const ut=String(x.underlyingType||'').toUpperCase(),ct=String(x.contractType||'').toUpperCase(),sub=(x.underlyingSubType||[]).join(' ').toUpperCase();
@@ -82,7 +82,7 @@ async function uniBF(){
     const name=x.baseAsset||x.symbol.replace(/USDT$/,'');
     let cat=ut==='COMMODITY'||ut==='METAL'||CAT_COM.has(name)?'Materias primas':/EQUITY|STOCK/.test(ut)?'Acciones':(ut==='FOREX'||ut==='FX'||CAT_FX.has(name))?'Divisas':CAT_IDX.has(name)?'Índices':'TradFi';
     const sess={HK_EQUITY:'hk',KR_EQUITY:'krx',CN_EQUITY:'shanghai'}[ut];
-    const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess};setPx(k,vol[x.symbol][1]);out.push(k);
+    const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess,o24:vol[x.symbol][2]};setPx(k,vol[x.symbol][1]);out.push(k);
   });
   market.lists.BF=out.sort((a,b)=>market.meta[b].vol-market.meta[a].vol).slice(0,BF_CAP);ok('BF');
 }
@@ -98,12 +98,12 @@ async function uniHL(){
       if(!p||v<20000)return;
       const cat=CAT_IDX.has(name)?'Índices':CAT_COM.has(name)?'Materias primas':CAT_FX.has(name)?'Divisas':cryptoNames.has(name)?'Cripto':'Acciones';
       if(cat==='Cripto'&&S.settings.markets.BN)return; /* ya la cubre Binance */
-      if(!best[name]||best[name].v<v)best[name]={id,name,cat,v,p};
+      if(!best[name]||best[name].v<v)best[name]={id,name,cat,v,p,o24:+c.prevDayPx||0};
     });
     market.hlAt[dex]=Date.now();
   });
   const cap=S.settings.tf==='1m'?10:30;
-  market.lists.HL=Object.values(best).sort((a,b)=>b.v-a.v).slice(0,cap).map(x=>{const k='HL:'+x.id;market.meta[k]={name:x.name,cat:x.cat,vol:x.v};setPx(k,x.p);return k;});
+  market.lists.HL=Object.values(best).sort((a,b)=>b.v-a.v).slice(0,cap).map(x=>{const k='HL:'+x.id;market.meta[k]={name:x.name,cat:x.cat,vol:x.v,o24:x.o24};setPx(k,x.p);return k;});
   ok('HL');
 }
 async function loadUniverse(){
@@ -205,7 +205,7 @@ async function fetchKlines(tf){
   if(!market.raw)market.raw={};
   const toK=k=>k.map(r=>({t:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5],ct:r[6]}));
   const store=(k,arr)=>{
-    if(srcOf(k)==='BN'){market.k[tf][k]=arr.filter(c=>c.ct<now).slice(-120);return;}
+    if(srcOf(k)==='BN'){market.k[tf][k]=arr.filter(c=>c.ct<now).slice(-300);return;}
     const rk=tf+'|'+k,old=market.raw[rk]?market.raw[rk].c:[],m=new Map(old.map(c=>[c.t,c]));arr.forEach(c=>m.set(c.t,c));
     const all=[...m.values()].sort((x,y)=>x.t-y.t).slice(-3000);market.raw[rk]={tf,c:all};
     const cls=sessOf(k);market.k[tf][k]=all.filter(c=>c.ct<now&&sessOpen(cls,c.t)).slice(-150);
@@ -215,7 +215,7 @@ async function fetchKlines(tf){
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
     pool(bin,6,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
-      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=120`);
+      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=300`);
       /* peso bajo: 499 velas la primera vez, y luego solo las nuevas (hasta 99) */
       else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit=499'));}
       }catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail(srcOf(k),e);throw e;}

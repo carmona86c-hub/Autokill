@@ -16,6 +16,7 @@ async function tick(manual){
     if(act&&now-S.lastSeen>120000)L(null,'pause',`Pausa de ${Math.round((now-S.lastSeen)/60000)} min (app cerrada o en segundo plano): no se operó. Todo lo aprendido y las posiciones siguen guardados; ahora se revisan con el precio actual.`);
     if(!market.universe.length||now-market.uniAt>30*60e3)await loadUniverse();else await pollPrices();
     if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
+    wsSync();
     /* los stops y objetivos se vigilan siempre, también con el agente en pausa */
     S.agents.forEach(checkExits);
     if(act){
@@ -148,7 +149,7 @@ function renderMarkets(){
   const order=['Cripto','Acciones','Índices','Materias primas','Divisas','TradFi','Otros'];
   const chips=order.filter(c=>cats[c]).map(c=>`<span class="mk"><b>${cats[c]}</b> ${c}</span>`).join('');
   const src=['BN','BF','HL'].filter(x=>S.settings.markets[x]).map(x=>{const st=market.src[x]||{};const live=st.ok&&Date.now()-st.at<90000;
-    return `<div class="srcl"><span class="dot ${live?'on':''}"></span><span>${SRCNAME[x]}</span><span class="note">${live?market.lists[x].length+' activos':st.err?'sin respuesta ('+esc(st.err)+')':'conectando…'}</span></div>`;}).join('');
+    return `<div class="srcl"><span class="dot ${live?'on':''}"></span><span>${SRCNAME[x]}</span><span class="note">${live?market.lists[x].length+' activos'+((REM.on?(market.wsv||{})[x]:wsLive(x))?' · en directo':''):st.err?'sin respuesta ('+esc(st.err)+')':'conectando…'}</span></div>`;}).join('');
   const by={};market.universe.forEach(k=>{const c=sessOf(k);(by[c]=by[c]||[]).push(k);});
   const now=Date.now(),hm=t=>new Date(t).toLocaleString('es-ES',{weekday:'short',hour:'2-digit',minute:'2-digit'});
   const ses=Object.keys(SESS).filter(c=>by[c]).map(c=>{const o=sessOpen(c,now),mc=o?minsToClose(c):0,no=o?null:nextOpen(c);

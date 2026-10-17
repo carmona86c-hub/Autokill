@@ -55,6 +55,7 @@ function applyCmd(c,a){
       if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
       S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Lo que gane por encima de su capital pasa a la cartera reservada (congelada). Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan. Lo ya reservado sigue congelado.');
       S.agents.forEach(checkExits);S.agents.forEach(sweep);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
+    case 'study':{const r=capStudy(true);return S.capStudy&&r==='hecho'?ok('Estudio actualizado.'):no('No se pudo: '+(r||'el agente no está activo')+'.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}
     case 'export':{const st=JSON.parse(JSON.stringify(S));if(st.settings.notify)st.settings.notify.token='';return ok('Copia lista.',{state:st});}
@@ -65,7 +66,7 @@ function applyCmd(c,a){
 }
 /* informe con las etapas anteriores (cada vez que se reinició el saldo) */
 function reportFull(){
-  const r=S.runs||[],ev=evoReport()+labReport();if(!r.length)return report()+ev;
+  const r=S.runs||[],ev=evoReport()+labReport()+capReport();if(!r.length)return report()+ev;
   return report()+ev+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
 }
 /* tu registro en el informe: así se puede revisar con Claude si el límite o las ventas manuales compensan */

@@ -11,7 +11,7 @@ function agentScan(a,manual){
   if(halted&&a.dayHalt!==a.dayKey){a.dayHalt=a.dayKey;L(a,'tier',`Límite de pérdida diaria alcanzado (${pct(dayLoss(a))} hoy). No abre nuevas operaciones hasta mañana; las abiertas siguen con sus stops.`);}
   if(!manual){
     for(const p of a.positions.slice()){
-      p.bars++;if(p.capNet>0)continue; /* límite de ganancia del usuario: no se cierra por tiempo, falta de avance ni cruces */
+      p.bars++;
       const an=analyze(p.sym,P,p.tf);
       const px0=pxFresh(p.sym,90000)?market.price[p.sym]:null,prog=px0?(isShort(p)?p.entry-px0:px0-p.entry)/p.risk:null;
       if(Date.now()>=(p.until||p.openedAt+P.maxHold*TF_MS[S.settings.tf]))closePos(a,p,'tiempo máximo');
@@ -187,7 +187,7 @@ function healthOf(c){
   if(c.tier==='critical')why.push('nivel crítico');
   const ref=c.life==='recovering'?(c.recPeak||c.peak):c.peak,dd=ref>0?(ref-total(c))/ref:0;
   if(dd>.15)why.push(`caída del ${(dd*100).toFixed(0)}% desde su máximo`);
-  const last=c.closed.slice(-4);if(last.length===4&&last.every(x=>x.pnl<=0)&&c.closed.length-(c.recFrom||0)>=4)why.push('4 pérdidas seguidas');
+  const last=c.closed.filter(x=>!x.user).slice(-4);if(last.length===4&&last.every(x=>x.pnl<=0)&&c.closed.length-(c.recFrom||0)>=4)why.push('4 pérdidas seguidas');
   return why;
 }
 function checkChild(c){
@@ -308,7 +308,7 @@ function variant(P){
   if(Q.emaF>=Q.emaS)Q.emaS=Math.min(BOUNDS.emaS[1],Q.emaF+4);
   return Q;
 }
-const liveExp=(a,since)=>{const t=a.closed.filter(x=>!since||x.t1>since).slice(0,30);return {n:t.length,m:t.length?t.reduce((s,x)=>s+x.pct,0)/t.length:0};};
+const liveExp=(a,since)=>{const t=a.closed.filter(x=>!x.user&&(!since||x.t1>since)).slice(0,30);return {n:t.length,m:t.length?t.reduce((s,x)=>s+x.pct,0)/t.length:0};};
 const evoOf=a=>a.evo||(a.evo={ver:1,at:0,last:0,hist:[],prev:null,check:null});
 function selfImprove(a,force){
   if(a.status!=='alive'||S.settings.selfOpt===false)return null;
@@ -351,7 +351,7 @@ function checkRollback(a){
 let edgeC={at:0,m:{}};
 function edgeAdj(an){
   if(Date.now()-edgeC.at>60000){
-    const all=S.agents.flatMap(a=>a.closed.slice(0,200)).sort((x,y)=>y.t1-x.t1),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
+    const all=S.agents.flatMap(a=>a.closed.filter(x=>!x.user).slice(0,200)).sort((x,y)=>y.t1-x.t1),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
     for(const d of ['long','short'])m['s:'+d]=f(all.filter(x=>(x.side||'long')===d));
     for(const c of new Set(all.map(x=>catOf(x.sym))))m['c:'+c]=f(all.filter(x=>catOf(x.sym)===c));
     edgeC={at:Date.now(),m};

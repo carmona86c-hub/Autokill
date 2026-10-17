@@ -50,6 +50,17 @@ header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;bo
 .tbtn{text-align:left;cursor:pointer}.tbtn[aria-expanded=true]{border-color:var(--money)}
 .drop{margin-top:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px 12px;max-height:48vh;overflow-y:auto}
 .drop[hidden]{display:none}
+.hrow{display:flex;gap:10px;align-items:stretch;justify-content:space-between;margin-top:10px}
+.hrow .hm{min-width:0;flex:1 1 auto}
+.mode{flex:0 0 auto;width:132px;display:flex;flex-direction:column;justify-content:center}
+.mode b{font:600 15px var(--mono)}.mode.on{border-color:var(--money)}.mode.on b{color:var(--money)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0 8px}
+.seg .btn{padding:8px 6px}.seg .btn[aria-pressed=true]{background:var(--money);border-color:var(--money);color:#10151a}
+.step{display:grid;grid-template-columns:44px 1fr 44px;gap:6px;align-items:center}
+.step .btn{padding:8px 0;font:700 18px var(--mono)}.step input{text-align:center;font:600 16px var(--mono)}
+.pre{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.pre .btn{padding:5px 10px;font:600 12px var(--mono)}
+.lab{font-size:12.5px;padding:8px 0 10px;border-top:1px solid var(--line);margin-top:10px}
+@media (max-width:360px){.mode{width:112px}.big{font-size:32px}}
 .dsum{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:600 12px var(--mono);padding:8px 0}
 .dp{padding:10px 0;border-top:1px solid var(--line)}
 .dp .h{display:flex;justify-content:space-between;gap:8px;font-weight:700;flex-wrap:wrap}
@@ -128,9 +139,13 @@ summary{list-style-position:inside}
     <span class="brand">Automaton</span>
     <div class="chips"><span id="cConn" class="chip off">—</span><span id="cTier" class="chip">—</span></div>
   </div>
-  <div class="lbl" style="margin-top:10px">Patrimonio total</div>
-  <div id="hTotal" class="big">$0.00</div>
-  <div id="hPnl" class="pnl">—</div>
+  <div class="hrow">
+    <div class="hm"><div class="lbl">Patrimonio total</div>
+      <div id="hTotal" class="big">$0.00</div>
+      <div id="hPnl" class="pnl">—</div></div>
+    <button id="tMode" class="tile tbtn mode" type="button" aria-expanded="false" aria-controls="modeDrop"><span class="lbl" id="tModeL">Modo ▾</span><b id="tModeV">Automático</b></button>
+  </div>
+  <div id="modeDrop" class="drop" hidden></div>
   <div class="tiles">
     <div class="tile"><span class="lbl">Efectivo libre</span><b id="tOp">—</b></div>
     <button id="tPos" class="tile tbtn" type="button" aria-expanded="false" aria-controls="posDrop"><span class="lbl">Posiciones ▾</span><b id="tRes">—</b></button>

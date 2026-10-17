@@ -18,7 +18,7 @@ async function tick(manual){
     if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
     wsSync();
     /* los stops y objetivos se vigilan siempre, también con el agente en pausa */
-    S.agents.forEach(checkExits);
+    S.agents.forEach(checkExits);labWatch();
     if(act){
       const due=!manual&&now>=nextScan;
       if(due||manual){
@@ -76,7 +76,7 @@ function updateHero(){
   c.className='chip '+(on&&fresh?'live':'off');c.textContent=(REM.on?(remErr?'servidor sin respuesta':'servidor 24/7 · '):'')+(REM.on&&remErr?'':!alive().length?'todos apagados':!S.running?'en pausa':fresh?'mercado real':market.err?'sin conexión':'conectando');
   $('runBtn').textContent=S.running?'Pausar agente':'Reanudar agente';$('runBtn').disabled=!alive().length;
   $('scanBtn').disabled=!on;
-  renderDrop();
+  renderDrop();renderMode();
 }
 /* desplegable de «Posiciones»: qué tiene, cuánto ha metido, dónde y a qué precio entró y cómo va ese mercado ahora */
 let dropOpen=false;
@@ -100,6 +100,34 @@ function renderDrop(){
       <span>Neto si vende ya</span><b class="${netIfClose(p,price)>=0?'up':'down'}">${sgn(netIfClose(p,price))}</b></div></div>`;}).join('');
 }
 $('tPos').addEventListener('click',()=>{dropOpen=!dropOpen;renderDrop();});
+/* recuadro de modo: Automático (como siempre) o límite de ganancia por operación, ajustable al céntimo */
+let modeOpen=false,modeLim=false;
+const capV=()=>S.settings.capNet>0?S.settings.capNet:null,c2=v=>(Math.round(v*100)/100).toFixed(2).replace('.',',');
+function renderMode(){
+  const cap=capV(),t=$('tMode');t.classList.toggle('on',!!cap);t.setAttribute('aria-expanded',String(modeOpen));
+  $('tModeL').textContent=(cap?'Límite':'Modo')+' '+(modeOpen?'▴':'▾');$('tModeV').textContent=cap?'+'+money(cap):'Automático';
+  const box=$('modeDrop');box.hidden=!modeOpen;if(!modeOpen)return;
+  const ae=document.activeElement;if(ae&&ae.id==='capIn2')return; /* no se redibuja mientras escribes */
+  const lim=modeLim||!!cap,s=labSum('limit'),m=labSum('manual');
+  const line=(t,x)=>x.n?`<div><b>${t}:</b> ${x.n} venta${x.n>1?'s':''}, <span class="${x.pnl>=0?'up':'down'}">${sgn(x.pnl)}</span>${x.done?` · el plan del agente habría dado <span class="${x.plan>=0?'up':'down'}">${sgn(x.plan)}</span> en las ${x.done} ya comparadas → <b class="${x.diff>=0?'up':'down'}">${x.diff>=0?'ganas':'pierdes'} ${money(Math.abs(x.diff))}</b>`:''}${x.pend?` · ${x.pend} en seguimiento`:''}</div>`:'';
+  box.innerHTML=`<div class="seg"><button class="btn" type="button" data-m="auto" aria-pressed="${!lim}">Automático</button><button class="btn" type="button" data-m="lim" aria-pressed="${lim}">Límite de ganancia</button></div>
+    ${lim?`<div class="step"><button class="btn" type="button" data-d="-1" aria-label="Bajar un céntimo">−</button><input id="capIn2" type="number" inputmode="decimal" step="0.01" min="0.01" value="${cap?cap.toFixed(2):''}" placeholder="0.10" aria-label="Ganancia limpia por operación, en dólares"><button class="btn" type="button" data-d="1" aria-label="Subir un céntimo">+</button></div>
+    <div class="pre">${[.05,.1,.15,.2,.5,1].map(v=>`<button class="btn" type="button" data-v="${v}">${c2(v)}</button>`).join('')}</div>
+    <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
+    '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
+    <div class="lab"><div class="lbl" style="margin-bottom:4px">Tu registro · no cambia el aprendizaje del agente</div>${line('Con límite',s)+line('Ventas manuales',m)||'<div class="note">Aquí se irán guardando las ventas hechas con tu límite o a mano, y lo que habría pasado con el plan del agente, para ver si te compensa.</div>'}</div>`;
+}
+$('tMode').addEventListener('click',()=>{modeOpen=!modeOpen;if(!modeOpen)modeLim=false;renderMode();});
+async function setCap(v){const r=await act('mode',{cap:v});if(!r.ok)alert(r.msg);modeLim=v!=null;renderMode();}
+$('modeDrop').addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('button');if(!b)return;
+  if(b.dataset.m==='auto'){modeLim=false;setCap(null);return;}
+  if(b.dataset.m==='lim'){modeLim=true;renderMode();const i=$('capIn2');if(i&&!capV())i.focus();return;}
+  if(b.dataset.v)return setCap(+b.dataset.v);
+  if(b.dataset.d){const i=$('capIn2'),cur=parseFloat(String(i&&i.value||'').replace(',','.'))||capV()||.1;setCap(Math.max(.01,Math.round((cur+(+b.dataset.d)*.01)*100)/100));}
+});
+$('modeDrop').addEventListener('change',e=>{if(e.target.id!=='capIn2')return;const v=parseFloat(String(e.target.value).replace(',','.'));e.target.blur();if(v>0)setCap(v);else renderMode();});
+$('modeDrop').addEventListener('keydown',e=>{if(e.target.id==='capIn2'&&e.key==='Enter')e.target.blur();});
 function renderPanel(){
   const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));
   const ae=document.activeElement,typing=ae&&ae.tagName==='INPUT'&&ae.closest&&ae.closest('#posList'); /* no se redibuja mientras escribes el límite */
@@ -111,7 +139,7 @@ function renderPanel(){
       ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${esc(p.sym)}|${p.openedAt}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
       <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>${Math.round((Date.now()-p.openedAt)/60000)} min · velas ${p.tf||S.settings.tf}</span></div>
-      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
+      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
       ${(()=>{const key=esc(p.sym)+'|'+p.openedAt,open=sellOpen.has(p.sym+'|'+p.openedAt),mOpen=sessOpen(sessOf(p.sym),Date.now());
         return `<button class="btn" type="button" data-tog="${key}" aria-expanded="${open}" style="padding:4px 10px;font-size:12px;justify-self:start">Venta de acción ${open?'▴':'▾'}</button>`+(open?`
       <div class="row" style="gap:8px;align-items:center"><button class="btn" type="button" data-sell="${key}" ${mOpen?'':'disabled'} style="padding:6px 12px;border-color:var(--down);color:var(--down)">Vender ahora</button>

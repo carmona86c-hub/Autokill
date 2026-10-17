@@ -15,8 +15,9 @@ from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 MODEL = os.environ.get("KRONOS_MODEL", "NeoQuasar/Kronos-mini")
@@ -147,7 +148,34 @@ async def forecast(request: Request):
     return JSONResponse({"model": MODEL, "fake": FAKE, "ms": ms, "pred_len": pred_len, "results": res})
 
 
+AGENT = "http://127.0.0.1:" + os.environ.get("AGENT_PORT", "7000")
+
+
+async def agent(request: Request):
+    """Pasa /agent/... al agente 24/7 (Node, mismo contenedor)."""
+    import urllib.error
+    import urllib.request
+
+    url = AGENT + request.url.path + (("?" + request.url.query) if request.url.query else "")
+    body = await request.body() if request.method == "POST" else None
+
+    def call():
+        req = urllib.request.Request(url, data=body, method=request.method, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except Exception as e:
+            return 503, ('{"ok":false,"error":"el agente no responde (' + type(e).__name__ + ')"}').encode()
+
+    code, data = await run_in_threadpool(call)
+    return Response(data, status_code=code, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 app = Starlette(
-    routes=[Route("/", home), Route("/forecast", forecast, methods=["POST"])],
-    middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])],
+    routes=[Route("/", home), Route("/forecast", forecast, methods=["POST"]),
+            Route("/agent/{rest:path}", agent, methods=["GET", "POST"])],
+    middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"]),
+                Middleware(GZipMiddleware, minimum_size=1000)],
 )

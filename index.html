@@ -123,8 +123,8 @@ summary{list-style-position:inside}
   <div id="hTotal" class="big">$0.00</div>
   <div id="hPnl" class="pnl">—</div>
   <div class="tiles">
-    <div class="tile"><span class="lbl">Operativo</span><b id="tOp">—</b></div>
-    <div class="tile"><span class="lbl">Reserva</span><b id="tRes">—</b></div>
+    <div class="tile"><span class="lbl">Efectivo libre</span><b id="tOp">—</b></div>
+    <div class="tile"><span class="lbl">Posiciones</span><b id="tRes">—</b></div>
     <div class="tile"><span class="lbl" id="tLossL">Resultado</span><b id="tLoss">—</b></div>
   </div>
 </header>
@@ -142,7 +142,7 @@ summary{list-style-position:inside}
         <input id="capIn" type="number" inputmode="decimal" min="20" step="10" aria-label="Capital inicial en dólares">
         <button id="capBtn" class="btn pri" type="button">Fijar y reiniciar</button>
       </div>
-      <p class="note" style="margin:8px 0 0">Depósito ficticio con precios reales. Fijarlo borra posiciones, registro y estadísticas, pero conserva la experiencia acumulada. El agente solo opera con este depósito y aparta en la reserva lo que gane por encima.</p>
+      <p class="note" style="margin:8px 0 0">Depósito ficticio con precios reales. Fijarlo reinicia el saldo, las posiciones y el registro, pero conserva lo aprendido (experiencia, reglas afinadas y resumen de cada etapa). Lo que gana se queda operando: no se aparta nada.</p>
     </div>
     <div class="row">
       <button id="runBtn" class="btn" type="button" style="flex:1">Pausar agente</button>
@@ -172,7 +172,7 @@ summary{list-style-position:inside}
 
   <section id="s-lin">
     <div class="card"><h2>Replicación</h2>
-      <p class="note" style="margin:0 0 8px">Como en Automaton: cada hijo nace con su propia cartera (financiada desde la reserva del padre), una génesis (nombre, especialidad y mensaje inicial) y la constitución heredada sin cambios, verificada por su huella. Pasa por creando → financiando → configurando → arrancando → vivo; si enferma, intenta recuperarse; sin fondos, muere. El padre financia y aconseja, pero no controla. Máximo 3 hijos vivos por agente y 3 generaciones.</p>
+      <p class="note" style="margin:0 0 8px">Como en Automaton: cada hijo nace con su propia cartera (financiada desde el capital del padre), una génesis (nombre, especialidad y mensaje inicial) y la constitución heredada sin cambios, verificada por su huella. Pasa por creando → financiando → configurando → arrancando → vivo; si enferma, intenta recuperarse; sin fondos, muere. El padre financia y aconseja, pero no controla. Máximo 3 hijos vivos por agente y 3 generaciones.</p>
       <details style="margin-bottom:10px"><summary class="note" style="cursor:pointer">Constitución · huella <span id="cHash" style="font-family:var(--mono)"></span></summary><pre id="cText" style="white-space:pre-wrap;font:11px/1.5 var(--mono);color:var(--mute);margin:8px 0 0"></pre></details>
       <div class="grid2">
         <div class="field"><label class="lbl" for="gPar">Padre</label><select id="gPar"></select></div>
@@ -197,7 +197,7 @@ summary{list-style-position:inside}
       <p id="hInfo" class="note" style="margin:8px 0 0"></p>
     </div>
     <div id="linList" style="display:grid;gap:12px"></div>
-    <div class="card" id="cemCard" hidden><h2>Cementerio</h2><p class="note" style="margin:0 0 8px">Hijos retirados del linaje. Su dinero sobrante volvió a la reserva del padre; lo aprendido de cada activo sigue en la experiencia.</p><div class="tw" id="cemList"></div></div>
+    <div class="card" id="cemCard" hidden><h2>Cementerio</h2><p class="note" style="margin:0 0 8px">Hijos retirados del linaje. Su dinero sobrante volvió al capital del padre; lo aprendido de cada activo sigue en la experiencia.</p><div class="tw" id="cemList"></div></div>
   </section>
 
   <section id="s-set">
@@ -249,7 +249,7 @@ summary{list-style-position:inside}
         <div class="field"><label class="lbl" for="sRep">Replicación</label><select id="sRep"><option value="1">Activada</option><option value="0">Desactivada</option></select></div>
         <div class="field"><label class="lbl" for="sKids">Hijos máximos</label><input id="sKids" type="number" min="0" max="5" inputmode="numeric"></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Cuando la reserva de un agente alcanza el doble del capital de un hijo, crea uno con parámetros mutados, financiado desde esa reserva. Si el hijo supera a su padre, el padre adopta la mitad de sus parámetros.</p>
+      <p class="note" style="margin:8px 0 0">Cuando lo que un agente gana por encima de su capital llega al doble de lo que cuesta un hijo, crea uno con parámetros mutados, financiado con ese beneficio. Si el hijo supera a su padre, el padre adopta la mitad de sus parámetros.</p>
     </div>
     <div class="card">
       <h2>Parámetros del agente original</h2>

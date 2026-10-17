@@ -12,7 +12,10 @@ function agentScan(a,manual){
   if(!manual){
     for(const p of a.positions.slice()){
       p.bars++;const an=analyze(p.sym,P,p.tf);
+      const px0=pxFresh(p.sym,90000)?market.price[p.sym]:null,prog=px0?(isShort(p)?p.entry-px0:px0-p.entry)/p.risk:null;
       if(Date.now()>=(p.until||p.openedAt+P.maxHold*TF_MS[S.settings.tf]))closePos(a,p,'tiempo máximo');
+      /* sin avance: si tras 16 velas no ha recorrido ni un cuarto del riesgo hacia el objetivo, se cierra para usar el dinero en algo que se mueva */
+      else if(prog!=null&&Date.now()-p.openedAt>=16*TF_MS[S.settings.tf]&&prog<.25)closePos(a,p,'sin avance: libera el capital');
       else if(an&&(isShort(p)?an.bullCross:an.bearCross))closePos(a,p,isShort(p)?'cruce alcista de medias':'cruce bajista de medias');
     }
   }
@@ -283,7 +286,7 @@ function simSerie(s,P,i0,i1,cost,shorts){
       const b=k[i];let x=null;p.bars++;
       if(p.sh){if(b.h>=p.stop)x=p.stop;else if(b.l<=p.tp)x=p.tp;else if(b.l<p.low){p.low=b.l;if(p.low<=p.e-p.r)p.stop=Math.min(p.stop,p.low+P.trailATR*p.atr);}}
       else{if(b.l<=p.stop)x=p.stop;else if(b.h>=p.tp)x=p.tp;else if(b.h>p.high){p.high=b.h;if(p.high>=p.e+p.r)p.stop=Math.max(p.stop,p.high-P.trailATR*p.atr);}}
-      if(x===null&&(p.bars>=P.maxHold||(p.sh?ef[i]>es[i]:ef[i]<es[i])))x=b.c;
+      if(x===null&&(p.bars>=P.maxHold||(p.sh?ef[i]>es[i]:ef[i]<es[i])||(p.bars>=16&&(p.sh?p.e-b.c:b.c-p.e)/p.r<.25)))x=b.c;
       if(x!==null){out.push(p.sz*((p.sh?p.e-x:x-p.e)/p.e-cost));p=null;}
       continue;
     }

@@ -53,7 +53,9 @@ header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;bo
 .drop[hidden]{display:none}
 .hrow{display:flex;gap:10px;align-items:stretch;justify-content:space-between;margin-top:10px}
 .hrow .hm{min-width:0;flex:1 1 auto}
-.mode{flex:0 0 auto;width:132px;display:flex;flex-direction:column;justify-content:center}
+.hside{flex:0 0 auto;width:132px;display:flex;flex-direction:column;gap:6px}
+.mode{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:6px 10px}
+.vbox{flex:1 1 auto;padding:6px 10px;display:flex;flex-direction:column;justify-content:center}.vbox b{font:600 15px var(--mono);color:var(--money)}
 .mode b{font:600 15px var(--mono)}.mode.on{border-color:var(--money)}.mode.on b{color:var(--money)}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0 8px}
 .seg .btn{padding:8px 6px}.seg .btn[aria-pressed=true]{background:var(--money);border-color:var(--money);color:#10151a}
@@ -61,7 +63,8 @@ header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;bo
 .step .btn{padding:8px 0;font:700 18px var(--mono)}.step input{text-align:center;font:600 16px var(--mono)}
 .pre{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.pre .btn{padding:5px 10px;font:600 12px var(--mono)}
 .lab{font-size:12.5px;padding:8px 0 10px;border-top:1px solid var(--line);margin-top:10px}
-@media (max-width:360px){.mode{width:112px}.big{font-size:32px}}
+@media (max-width:360px){.hside{width:112px}.big{font-size:32px}}
+.cs{width:100%;min-width:0;font:12px var(--mono);margin-top:6px}.cs td,.cs th{padding:4px 4px}.cs tr.best td{color:var(--money);font-weight:600}
 .dsum{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:600 12px var(--mono);padding:8px 0}
 .dp{padding:10px 0;border-top:1px solid var(--line)}
 .dp .h{display:flex;justify-content:space-between;gap:8px;font-weight:700;flex-wrap:wrap}
@@ -86,9 +89,15 @@ h2{font:700 12px var(--ui);letter-spacing:.1em;text-transform:uppercase;margin:0
 .btn.warn{border-color:var(--down);color:var(--down);background:var(--panel)}
 input,select{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
 .cap input{flex:1 1 120px;font:500 16px var(--mono)}
-.pos{display:grid;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
-.pos:first-child{border-top:0;padding-top:0}
-.pos .h{display:flex;justify-content:space-between;gap:8px;font-weight:700}
+.pos{border-top:1px solid var(--line)}
+.pos:first-child{border-top:0}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) 72px auto 14px;gap:8px;align-items:center;width:100%;background:none;border:0;padding:9px 0;text-align:left;cursor:pointer}
+.prow .pn{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .pn small{display:block;font:11px var(--ui);color:var(--mute);font-weight:500}
+.prow .pv{text-align:right;font:11.5px var(--mono);color:var(--mute);white-space:nowrap}.prow .pv b{display:block;font:600 14px var(--mono)}
+.prow .chev{color:var(--mute);font-size:12px}
+canvas.spark{width:72px;height:28px}
+.pd{display:grid;gap:6px;padding:0 0 12px}
 .bar{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--down),var(--chip) 35%,var(--chip) 65%,var(--up))}
 .bar i{position:absolute;top:-3px;width:3px;height:12px;background:var(--fg);border-radius:2px;transform:translateX(-50%)}
 .sub{color:var(--mute);font:12px var(--mono);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -144,7 +153,10 @@ summary{list-style-position:inside}
     <div class="hm"><div class="lbl">Patrimonio total</div>
       <div id="hTotal" class="big">$0.00</div>
       <div id="hPnl" class="pnl">—</div></div>
-    <button id="tMode" class="tile tbtn mode" type="button" aria-expanded="false" aria-controls="modeDrop"><span class="lbl" id="tModeL">Modo ▾</span><b id="tModeV">Automático</b></button>
+    <div class="hside">
+      <button id="tMode" class="tile tbtn mode" type="button" aria-expanded="false" aria-controls="modeDrop"><span class="lbl" id="tModeL">Modo ▾</span><b id="tModeV">Automático</b></button>
+      <div class="tile vbox" title="Cartera reservada: congelada, no se usa para operar"><span class="lbl">🔒 Reservado</span><b id="tVault">$0,00</b></div>
+    </div>
   </div>
   <div id="modeDrop" class="drop" hidden></div>
   <div class="tiles">

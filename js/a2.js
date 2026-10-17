@@ -13,6 +13,8 @@ function migrate(s){
   if(!s.settings.noResV){s.settings.noResV=1;s.agents.forEach(a=>{const r=a.reserve||0,d=r-(a.parentId==null?(a.swept||0):0);a.cash+=r;a.reserve=0;if(a.parentId==null)a.swept=0;
     if(d){a.initial=Math.max(1,a.initial+d);a.peak+=d;if(a.dayStart)a.dayStart+=d;a.hist=(a.hist||[]).map(([t,v])=>[t,v+d]);}if(!a.seed)a.seed=a.initial;});}
   const fx=k=>k.includes(':')?k:'BN:'+k;
+  /* el límite de ganancia se quitó: las posiciones que lo tenían vuelven al objetivo del agente */
+  s.agents.forEach(a=>(a.positions||[]).forEach(p=>{if(p.tp0!=null)p.tp=p.tp0;delete p.tp0;delete p.capNet;}));
   s.agents.forEach(a=>{a.positions.forEach(p=>p.sym=fx(p.sym));a.closed.forEach(t=>t.sym=fx(t.sym));const cd={};for(const k in a.cooldown||{})cd[fx(k)]=a.cooldown[k];a.cooldown=cd;});
   const ex={};for(const k in s.exp)ex[fx(k)]=s.exp[k];s.exp=ex;
   return s;
@@ -105,7 +107,6 @@ function krPing(){
 function krExit(a){
   if(!krOn()||kset().mode!=='full')return;
   for(const p of a.positions.slice()){
-    if(p.capNet>0)continue; /* con límite de ganancia puesto por el usuario, solo la cierran el límite o el stop */
     const e=krEntry(p.sym,p.tf||S.settings.tf);if(!e||e.at<p.openedAt)continue;
     const sh=isShort(p),dir=sh?-e.r.ret:e.r.ret,agree=sh?1-e.r.up:e.r.up;
     if(agree<=.25&&dir<-costOf(p.sym))closePos(a,p,`Kronos prevé giro en contra (${pct(dir)})`);
@@ -179,14 +180,6 @@ function kill(a,why){
 function sweep(a){}
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
 function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym);return Math.max(0,posVal(p,price))-f-p.basis;}
-/* límite de ganancia de cada posición (solo si el usuario lo pone): no se vende hasta que, vendiendo, queden limpios esos dólares.
-   El objetivo pasa a ser exactamente ese precio; el stop original no cambia (sin trailing) y no se cierra antes por tiempo,
-   cruces ni Kronos. Lo único que la cierra antes es el stop o el cierre del mercado. Sin límite, todo sigue igual. */
-function capTp(p){
-  const t=p.tp0!=null?p.tp0:p.tp;if(!(p.capNet>0))return t;
-  const sl=S.settings.slip,fe=feeOf(p.sym),need=p.basis+p.capNet;
-  return isShort(p)?(2*p.entry-need/p.qty)/(1+fe)/(1+sl):need/(p.qty*(1-sl)*(1-fe));
-}
 function openPos(a,an,P){
   const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
@@ -223,13 +216,13 @@ function checkExits(a){
     if(!pxFresh(p.sym,90000))continue; /* precio viejo: se espera al siguiente */
     const price=market.price[p.sym];
     if(isShort(p)){
-      if(price<(p.low||p.entry)){p.low=price;if(!(p.capNet>0)&&p.low<=p.entry-p.risk)p.stop=Math.min(p.stop,p.low+a.params.trailATR*p.atr);}
+      if(price<(p.low||p.entry)){p.low=price;if(p.low<=p.entry-p.risk)p.stop=Math.min(p.stop,p.low+a.params.trailATR*p.atr);}
       if(price>=p.stop)closePos(a,p,p.stop<p.entry?'trailing':'stop');
-      else if(price<=p.tp)closePos(a,p,p.capNet>0?'límite de ganancia alcanzado':'objetivo');
+      else if(price<=p.tp)closePos(a,p,'objetivo');
     }else{
-      if(price>p.high){p.high=price;if(!(p.capNet>0)&&p.high>=p.entry+p.risk)p.stop=Math.max(p.stop,p.high-a.params.trailATR*p.atr);}
+      if(price>p.high){p.high=price;if(p.high>=p.entry+p.risk)p.stop=Math.max(p.stop,p.high-a.params.trailATR*p.atr);}
       if(price<=p.stop)closePos(a,p,p.stop>p.entry?'trailing':'stop');
-      else if(price>=p.tp)closePos(a,p,p.capNet>0?'límite de ganancia alcanzado':'objetivo');
+      else if(price>=p.tp)closePos(a,p,'objetivo');
     }
   }
 }

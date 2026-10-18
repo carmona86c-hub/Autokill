@@ -63,7 +63,7 @@ try{if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serv
 /* ---------- interfaz ---------- */
 let tab='panel';
 function updateHero(){
-  const ags=S.agents,vault=ags.reduce((t,a)=>t+(a.vault||0),0),tot=ags.reduce((t,a)=>t+eq(a),0)+vault,op=ags.reduce((t,a)=>t+a.cash,0);
+  const ags=S.agents,vault=ags.reduce((t,a)=>t+(a.vault||0),0),tot=ags.reduce((t,a)=>t+eq(a),0)+vault,op=ags.reduce((t,a)=>t+freeCash(a),0);
   const npos=ags.reduce((t,a)=>t+a.positions.length,0),pl=tot-S.initial;
   $('hTotal').textContent=money(tot);
   const el=$('hPnl');el.className='pnl '+(pl>=0?'up':'down');
@@ -317,7 +317,8 @@ function renderStats(){
 function renderOrders(){
   const o=(S.orders||[]).slice(0,25),c=S.agents.flatMap(a=>a.closed),fu=c.reduce((t,x)=>t+(x.fund||0),0)+S.agents.reduce((t,a)=>t+a.positions.reduce((u,p)=>u+(p.fund||0),0),0);
   const nr=Object.keys(market.rules||{}).length,nf=Object.keys(market.fund||{}).length;
-  $('ordInfo').innerHTML=`Modo: <b>simulación</b> · real: <b>desactivado</b> · reglas del exchange cargadas para ${nr} activos · financiación en directo de ${nf} perpetuos · financiación acumulada <span class="${fu>=0?'up':'down'}">${sgn(fu)}</span>`;
+  const ib=isIB(),pend=S.agents.reduce((t,a)=>t+a.cash-freeCash(a),0);
+  $('ordInfo').innerHTML=`Broker: <b>${ib?'IBKR · '+(S.settings.ibPlan==='fixed'?'tarifa fija':'tarifa escalonada')+' · '+(marginOK()?'cuenta de margen':'cuenta de efectivo (sin cortos)'):'exchanges (Binance y Hyperliquid)'}</b> · modo: <b>simulación</b> · real: <b>desactivado</b>${ib?(pend>.005?` · pendiente de liquidar ${money(pend)}`:''):` · reglas del exchange cargadas para ${nr} activos · financiación en directo de ${nf} perpetuos`} · ${ib?'préstamo de cortos':'financiación'} acumulado <span class="${fu>=0?'up':'down'}">${sgn(fu)}</span>`;
   const kn={abrir:'abrir',parcial:'vender mitad',cerrar:'cerrar'};
   $('ordT').innerHTML=o.length?`<table><tr><th>Hora</th><th>Activo</th><th>Orden</th><th>Cantidad</th><th>Precio</th><th>Comisión</th></tr>${o.map(x=>`<tr><td>${new Date(x.t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</td><td>${esc(base(x.sym))}<br><small class="note">${esc(x.venue||'')}</small></td><td>${x.side==='BUY'?'compra':'venta'}<br><small class="note">${kn[x.kind]||x.kind}</small></td><td class="mono">${esc(x.req&&x.req.p?(x.req.p.quantity||x.req.p.sz||x.qty):x.qty)}</td><td>${px(x.price)}</td><td>${money(x.fee||0)}</td></tr>`).join('')}</table>`:'<div class="empty">Aún no hay órdenes desde esta versión.</div>';
 }

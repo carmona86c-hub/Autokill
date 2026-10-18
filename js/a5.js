@@ -2,7 +2,7 @@
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=s.broker==='ibkr'?'ibkr':'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -16,6 +16,8 @@ function applySettings(o){
   if(isFinite(o.maxKids)&&o.maxKids>=0&&o.maxKids<=5)s.maxKids=o.maxKids;
   if('repl' in o)s.repl=!!o.repl;if('shorts' in o)s.shorts=!!o.shorts;
   if('cryptoFut' in o&&!!o.cryptoFut!==(s.cryptoFut!==false)){s.cryptoFut=!!o.cryptoFut;market.uniAt=0;}
+  if(o.broker&&o.broker!==s.broker&&['ibkr','ex'].includes(o.broker)){s.broker=o.broker;market.uniAt=0;market.universe=[];L(null,'info',o.broker==='ibkr'?'Broker: IBKR. La simulación usa sus comisiones, sus mercados y sus reglas.':'Broker: exchanges (Binance y Hyperliquid directamente).');}
+  if(o.ibPlan&&['tiered','fixed'].includes(o.ibPlan))s.ibPlan=o.ibPlan;
   if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
   if('device' in o)s.device=String(o.device||'').slice(0,60);
@@ -86,8 +88,8 @@ function healthReport(){
 /* ejecución como en el exchange real: reglas, financiación y las últimas órdenes tal y como se enviarían */
 function execReport(){
   const o=S.orders||[],c=S.agents[0].closed,fu=c.reduce((t,x)=>t+(x.fund||0),0),by={};o.forEach(x=>{by[x.venue]=(by[x.venue]||0)+1;});
-  return `\nEJECUCIÓN (modo simulación; real desactivado) · reglas del exchange para ${Object.keys(market.rules||{}).length} activos · financiación en directo de ${Object.keys(market.fund||{}).length} perpetuos\n`+
-    `  órdenes registradas: ${o.length}${o.length?' ('+Object.entries(by).map(([k,v])=>v+' '+k).join(', ')+')':''} · financiación cobrada/pagada en operaciones cerradas: ${sgn(fu)}`+
+  return `\nEJECUCIÓN · broker ${isIB()?'IBKR ('+(S.settings.ibPlan==='fixed'?'fija':'escalonada')+', '+(marginOK()?'margen':'efectivo')+')':'exchanges'} (modo simulación; real desactivado)${isIB()?'':` · reglas del exchange para ${Object.keys(market.rules||{}).length} activos · financiación en directo de ${Object.keys(market.fund||{}).length} perpetuos`}\n`+
+    `  órdenes registradas: ${o.length}${o.length?' ('+Object.entries(by).map(([k,v])=>v+' '+k).join(', ')+')':''} · ${isIB()?'préstamo pagado por cortos':'financiación cobrada/pagada'} en operaciones cerradas: ${sgn(fu)}${isIB()&&S.agents[0].cash-freeCash(S.agents[0])>.005?' · pendiente de liquidar '+money(S.agents[0].cash-freeCash(S.agents[0])):''}`+
     (o.length?'\n  Últimas órdenes:\n'+o.slice(0,8).map(x=>`    ${new Date(x.t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} ${x.kind} ${base(x.sym)} → ${x.req.api} ${JSON.stringify(x.req.p)}`).join('\n'):'');
 }
 /* tu registro en el informe: así se puede revisar con Claude si el límite o las ventas manuales compensan */
@@ -276,7 +278,7 @@ $('hPrune').addEventListener('click',async()=>{hOut((await act('prune')).msg);})
 function collectSettings(){
   const n=id=>parseFloat($(id).value),params={};for(const k in DEF_PARAMS)params[k]=$('p_'+k).value;
   return {fee:n('sFee')/100,slip:n('sSlip')/100,maxDay:n('sDay')/100,universe:Math.round(n('sUni')),maxKids:Math.round(n('sKids')),
-    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',
+    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',broker:$('sBroker').value,ibPlan:$('sPlan').value,
     kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
     device:$('devName').value.trim(),tf:$('sTf').value,params};
 }

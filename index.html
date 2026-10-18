@@ -253,9 +253,17 @@ summary{list-style-position:inside}
       </div>
     </div>
     <div class="card">
+      <h2>Broker</h2>
+      <div class="grid2">
+        <div class="field"><label class="lbl" for="sBroker">Simular como</label><select id="sBroker"><option value="ibkr">IBKR</option><option value="ex">Exchanges cripto</option></select></div>
+        <div class="field"><label class="lbl" for="sPlan">Tarifa IBKR</label><select id="sPlan"><option value="tiered">Escalonada</option><option value="fixed">Fija</option></select></div>
+      </div>
+      <p class="note" style="margin:8px 0 0">Con IBKR la simulación sigue sus reglas: acciones y ETF de EE. UU. (los índices y materias primas se operan con su ETF) en horario de bolsa, por acción y con mínimo por orden (escalonada: $0,0035 por acción, mínimo $0,35; fija: $0,005, mínimo $1; nunca más del 1 %); cripto solo BTC, ETH, SOL, XRP, ADA y DOGE, solo compra, 0,18 % con mínimo de $1,75; divisas con mínimo de $2. Cortos solo con cuenta de margen (desde $2.000) y por acciones enteras, pagando préstamo. En cuenta de efectivo, lo que se cobra al vender acciones se puede volver a usar al día hábil siguiente. Con poco capital los mínimos por orden pesan mucho: el agente descarta lo que no cubre los costes.</p>
+    </div>
+    <div class="card">
       <h2>Mercado y costes</h2>
       <div class="grid2">
-        <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%)</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%) · modo exchanges</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
         <div class="field"><label class="lbl" for="sSlip">Deslizamiento (%)</label><input id="sSlip" type="number" step="0.01" inputmode="decimal"></div>
         <div class="field"><label class="lbl" for="sDay">Pérdida diaria máxima (%)</label><input id="sDay" type="number" step="0.5" min="0.5" max="20" inputmode="decimal"></div>
         <div class="field"><label class="lbl" for="sUni">Criptomonedas vigiladas</label><input id="sUni" type="number" min="5" max="60" inputmode="numeric"></div>

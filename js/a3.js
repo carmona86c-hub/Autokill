@@ -23,7 +23,7 @@ function agentScan(a,manual){
   }
   const keys=halted||sick?[]:uni().filter(k=>inSpec(a,k)&&isOpen(k)&&minsToClose(sessOf(k))>15).slice(0,T.syms);
   if(halted&&a.id===0){ui.summary='Pausa por límite de pérdida diaria: hoy no abre más operaciones';ui.reasons='';ui.scanAt=Date.now();}
-  const rows=keys.map(k=>tfs().map(tf=>analyze(k,P,tf)).filter(Boolean).flatMap(an=>S.settings.shorts?[an,an.short]:[an])).filter(x=>x.length)
+  const rows=keys.map(k=>tfs().map(tf=>analyze(k,P,tf)).filter(Boolean).flatMap(an=>canShort(k)?[an,an.short]:[an])).filter(x=>x.length)
     .sort((x,y)=>Math.max(...y.map(z=>z.score))-Math.max(...x.map(z=>z.score)));
   if(a.id===0)ui.radar=rows.slice(0,8).map(r=>r.reduce((m,z)=>z.score>m.score?z:m));
   let opened=0,logged=0;const tally={};
@@ -324,11 +324,11 @@ const evoOf=a=>a.evo||(a.evo={ver:1,at:0,last:0,hist:[],prev:null,check:null});
 function selfImprove(a,force){
   if(a.status!=='alive'||S.settings.selfOpt===false)return null;
   const ev=evoOf(a);if(!force&&Date.now()-ev.last<OPT_EVERY)return null;
-  const ser=[];for(const tf of tfs())for(const k of uni()){if(!inSpec(a,k))continue;const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k)});}
+  const ser=[];for(const tf of tfs())for(const k of uni()){if(!inSpec(a,k))continue;const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k),sh:canShort(k)});}
   if(ser.length<8)return 'aún no hay velas suficientes para probar variantes';
   ev.last=Date.now();
   /* validación en dos periodos: elige con el 60 % más antiguo de las velas y exige mejorar en los dos tramos recientes (60-80 % y 80-100 %) */
-  const sh=S.settings.shorts,run=(P,part)=>{let sum=0,n=0,w=0;for(const x of ser){const L0=x.s.k.length,cut=[60,Math.floor(L0*.6),Math.floor(L0*.8),L0],r=simSerie(x.s,P,cut[part],cut[part+1],x.cost,sh);r.forEach(v=>{sum+=v;n++;if(v>0)w++;});}return {sum,n,w,fit:sum-(n<6?(6-n)*.003:0)};};
+  const run=(P,part)=>{let sum=0,n=0,w=0;for(const x of ser){const L0=x.s.k.length,cut=[60,Math.floor(L0*.6),Math.floor(L0*.8),L0],r=simSerie(x.s,P,cut[part],cut[part+1],x.cost,x.sh);r.forEach(v=>{sum+=v;n++;if(v>0)w++;});}return {sum,n,w,fit:sum-(n<6?(6-n)*.003:0)};};
   const both=(A,B)=>({sum:A.sum+B.sum,n:A.n+B.n,w:A.w+B.w,fit:A.fit+B.fit});
   const cur={...a.params},c0=run(cur,0),t0a=run(cur,1),t0b=run(cur,2),t0=both(t0a,t0b);
   let best=cur,bf=c0,tried=1;

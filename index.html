@@ -203,6 +203,7 @@ summary{list-style-position:inside}
     <div id="kpis" class="kpis"></div>
     <div class="card"><h2>Evolución del patrimonio</h2><canvas id="chart" aria-label="Gráfico de patrimonio"></canvas></div>
     <div class="card"><h2>Últimas operaciones</h2><div class="tw" id="trades"></div></div>
+    <div class="card"><h2>Órdenes al exchange</h2><p class="note" style="margin:0 0 8px">Cada compra y venta se construye como la orden real que recibiría el exchange (Binance o Hyperliquid), con sus redondeos y mínimos. Ahora se ejecutan en simulación: no se envía nada ni se usa dinero real.</p><div id="ordInfo" class="note" style="margin:0 0 8px"></div><div class="tw" id="ordT"></div></div>
     <div class="card"><h2>Informe para revisar</h2><p class="note" style="margin:0 0 8px">Resume resultados por agente, por tipo de mercado, al alza y a la baja, motivos de descarte y últimas operaciones. Cópialo y pégamelo en el chat para ajustar el agente con datos reales.</p>
       <button id="repBtn" class="btn pri" type="button">Copiar informe</button><p id="repMsg" class="note" style="margin:8px 0 0"></p>
       <textarea id="repTxt" rows="6" readonly aria-label="Informe" hidden style="width:100%;margin-top:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:11px var(--mono);padding:8px"></textarea></div>
@@ -271,7 +272,7 @@ summary{list-style-position:inside}
         <div class="field"><label class="lbl" for="mBF">Oro, plata y TradFi · Binance Futuros</label><select id="mBF"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
         <div class="field"><label class="lbl" for="mHL">Acciones, índices, materias primas y divisas · Hyperliquid</label><select id="mHL"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Cada activo solo se opera mientras su mercado real está abierto: acciones de EE. UU. de 9:30 a 16:00 de Nueva York con sus festivos, materias primas y divisas en horario de futuros, y criptomonedas siempre. Fuera de horario no entra, y las posiciones se cierran 5 minutos antes del cierre.</p>
+      <p class="note" style="margin:8px 0 0">Cada activo solo se opera mientras su mercado real está abierto: acciones de EE. UU. de 9:30 a 16:00 de Nueva York con sus festivos, materias primas y divisas en horario de futuros, y criptomonedas siempre. Fuera de horario no entra, y las posiciones se cierran 5 minutos antes del cierre. Como en el exchange real: en contado no se puede vender en corto, cada orden respeta la cantidad e importe mínimos del exchange, y los perpetuos pagan o cobran su financiación.</p>
     </div>
     <div class="card">
       <h2>Cerebro IA · Kronos</h2>

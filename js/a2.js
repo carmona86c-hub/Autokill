@@ -20,6 +20,8 @@ function migrate(s){
   /* salidas v2 (una sola vez): trailing más amplio para dejar correr las ganancias */
   if(!s.settings.exitV2){s.settings.exitV2=1;s.agents.forEach(a=>{if(a.params)a.params.trailATR=Math.max(2,+a.params.trailATR||0);});}
   /* criptomonedas en Binance Futuros (una sola vez): la experiencia de cada cripto pasa a su contrato */
+  /* broker IBKR (una sola vez): la simulación sigue sus comisiones, mercados y reglas */
+  if(s.settings.broker===undefined){s.settings.broker='ibkr';s.settings.ibPlan='tiered';}
   if(s.settings.cryptoFut===undefined){s.settings.cryptoFut=true;for(const k in s.exp)if(k.startsWith('BN:')){const nk='BF:'+k.slice(3),a=s.exp[k],b=s.exp[nk]||{n:0,w:0,pnl:0,sumPct:0};s.exp[nk]={n:a.n+b.n,w:a.w+b.w,pnl:a.pnl+b.pnl,sumPct:(a.sumPct||0)+(b.sumPct||0)};}}
   return s;
 }
@@ -173,12 +175,51 @@ function btcTrend(P){
 /* ---------- agente ---------- */
 /* un corto está cubierto al 100 % con capital propio: vale lo aportado más lo que gana si el precio baja */
 const isShort=p=>p.side==='short';
-/* comisión real de cada mercado: Binance contado (ajustable), Binance Futuros la mitad, Hyperliquid HIP-3 ~90 % */
-const feeOf=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
+/* ---------- broker ----------
+   IBKR (Interactive Brokers, entidad de Irlanda para clientes de España): la simulación usa sus comisiones, sus mercados y sus reglas.
+   · Acciones y ETF de EE. UU. (también los índices y materias primas, que en IBKR se operan con su ETF): por acción, con mínimo por orden;
+     fraccionadas al comprar; en corto solo acciones enteras y con cuenta de margen (desde $2.000); los cortos pagan préstamo.
+   · Cripto (Zero Hash): solo BTC, ETH, SOL, XRP, ADA y DOGE; solo compra (no hay cortos); 0,18 % con mínimo de $1,75 (como mucho el 1 %).
+   · Divisas: 0,2 pb del importe, mínimo $2.
+   · Cuenta de efectivo (por debajo de $2.000): sin cortos y el dinero de una venta de acciones se liquida al día hábil siguiente.
+   «exchanges»: el modo anterior (Binance y Hyperliquid directamente). */
+const isIB=()=>!!(S&&S.settings.broker==='ibkr');
+const IB_CRYPTO=new Set(['BTC','ETH','SOL','XRP','ADA','DOGE']);
+const ibClass=k=>{const c=catOf(k);return c==='Cripto'?'crypto':c==='Divisas'?'fx':'stk';};
+function ibOK(k){const m=metaOf(k)||{};if(catOf(k)==='Cripto')return IB_CRYPTO.has(base(k));return !['hk','krx','shanghai'].includes(m.sess);}
+const IB_MARGIN=2000;
+const marginOK=()=>S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0)>=IB_MARGIN;
+const feeRate0=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
+/* comisión real en dólares de una orden: q unidades a price; sell=true si la orden vende */
+function feeAmt(k,q,price,sell){
+  const V=q*price;if(!(V>0))return 0;
+  if(!isIB())return V*feeRate0(k);
+  const cl=ibClass(k);
+  if(cl==='crypto')return Math.max(.0018*V,Math.min(1.75,.01*V));
+  if(cl==='fx')return Math.max(2,.00002*V);
+  const reg=sell?.0000206*V+.000003*q:0; /* tasa de la SEC y CAT en las ventas */
+  if(S.settings.ibPlan==='fixed')return Math.min(Math.max(.005*q,1),.01*V)+reg;
+  return Math.min(Math.max(.0035*q,.35),.01*V)+.003*q+Math.min(.0002*q,.005*V)+reg; /* escalonada: comisión + bolsa + compensación */
+}
+/* coste por unidad con el tamaño habitual de posición: con mínimos por orden, las posiciones pequeñas pagan mucho más en proporción */
+function feeOf(k){
+  if(!isIB())return feeRate0(k);
+  const a=S.agents[0],n=Math.max(minNot(k),(a?eq(a):1000)*((a&&a.params.maxPosPct)||.08)),p0=market.price[k]||100;
+  return feeAmt(k,n/p0,p0,true)/n;
+}
 /* ---------- como en el exchange real ----------
    ruleOf: paso de cantidad, mínimos y paso de precio del exchange de ese activo (si aún no han llegado, se usan los de Binance: $5).
    Las cantidades se redondean hacia abajo al paso permitido, como haría el exchange; una orden que el exchange rechazaría, aquí también se rechaza. */
-const ruleOf=k=>(market.rules&&market.rules[k])||(S.meta&&S.meta[k]&&S.meta[k].rule)||null;
+function ruleOf(k){
+  if(isIB()){const cl=ibClass(k),p=market.price[k]||0;
+    return cl==='crypto'?{step:1e-8,minNot:1,venue:'IBKR · cripto'}:cl==='fx'?{step:1,minNot:1,venue:'IBKR · divisas'}:{step:1e-4,minNot:1,tick:p>=1?.01:.0001,venue:'IBKR · '+(catOf(k)==='Acciones'?'acciones EE. UU.':'ETF EE. UU.')};}
+  return (market.rules&&market.rules[k])||(S.meta&&S.meta[k]&&S.meta[k].rule)||null;
+}
+/* en IBKR los cortos de acciones van por acciones enteras */
+const wholeOnly=(k,sh)=>isIB()&&sh&&ibClass(k)==='stk';
+/* dinero disponible: en cuenta de efectivo, lo que viene de vender acciones no se puede usar hasta que se liquida (día hábil siguiente) */
+function freeCash(a){const n=Date.now();if(a.unset)a.unset=a.unset.filter(x=>x.at>n);return a.cash-(a.unset||[]).reduce((t,x)=>t+x.amt,0);}
+function settle(a,p,amt){if(isIB()&&ibClass(p.sym)==='stk'&&!marginOK()&&amt>0){const at=nextOpen('us',Date.now()+3600e3);if(at)(a.unset=a.unset||[]).push({amt,at});}}
 const minNot=k=>Math.max(MIN_NOTIONAL,(ruleOf(k)||{}).minNot||0);
 const decOf=st=>st>0?Math.max(0,Math.min(12,Math.round(-Math.log10(st)))):8;
 function rq(k,q,up){const r=ruleOf(k);if(!r||!(r.step>0))return q;const n=(up?Math.ceil:Math.floor)(q/r.step-(up?1e-9:-1e-9));return +(n*r.step).toFixed(decOf(r.step));}
@@ -189,17 +230,23 @@ function vet(k,q,price){const r=ruleOf(k)||{};if(!(q>0))return 'cantidad cero tr
   if(r.minQty&&q<r.minQty-1e-12)return `por debajo de la cantidad mínima del exchange (${r.minQty})`;
   if(r.maxQty&&q>r.maxQty)return `por encima de la cantidad máxima de una orden (${r.maxQty})`;
   if(q*price<minNot(k))return `por debajo del importe mínimo del exchange (${money(minNot(k))})`;return null;}
-/* en contado no se puede vender lo que no se tiene: los cortos solo existen en perpetuos (Binance Futuros, Hyperliquid) */
-const canShort=k=>!!S.settings.shorts&&srcOf(k)!=='BN';
+/* en contado no se puede vender lo que no se tiene: los cortos solo existen en perpetuos (Binance Futuros, Hyperliquid).
+   Con IBKR: nunca en cripto, y en acciones y divisas solo con cuenta de margen */
+const canShort=k=>!!S.settings.shorts&&(isIB()?ibClass(k)!=='crypto'&&marginOK():srcOf(k)!=='BN');
 /* la orden tal y como se enviaría al exchange (en simulación se guarda, no se envía) */
 function ticket(k,side,q,kind,price){
   const v=srcOf(k),id=idOf(k),r=ruleOf(k)||{},qs=q.toFixed(decOf(r.step)),red=kind!=='abrir';
+  if(isIB()){const cl=ibClass(k),o={ticker:base(k),secType:cl==='crypto'?'CRYPTO':cl==='fx'?'CASH':'STK',orderType:'MKT',side,tif:cl==='crypto'?'IOC':'DAY'};
+    if(cl==='crypto'&&side==='BUY')o.cashQty=+(q*price).toFixed(2);else o.quantity=+qs;
+    return {api:'POST /iserver/account/{cuenta}/orders',p:{orders:[o]}};}
   if(v==='BN')return {api:'POST /api/v3/order',p:{symbol:id,side,type:'MARKET',quantity:qs}};
   if(v==='BF')return {api:'POST /fapi/v1/order',p:Object.assign({symbol:id,side,type:'MARKET',quantity:qs},red?{reduceOnly:'true'}:{})};
   return {api:'POST /exchange (order)',p:{coin:id,isBuy:side==='BUY',sz:qs,limitPx:String(rp(k,price*(side==='BUY'?1.05:.95))),reduceOnly:red,tif:'Ioc'}};
 }
 function stopTicket(p){
   const v=srcOf(p.sym),id=idOf(p.sym),r=ruleOf(p.sym)||{},side=isShort(p)?'BUY':'SELL',sp=String(rp(p.sym,p.stop)),qs=p.qty.toFixed(decOf(r.step));
+  if(isIB()){const cl=ibClass(p.sym);if(cl==='crypto')return {api:'(la app vigila el stop y envía una orden de mercado al tocarlo)',p:{ticker:base(p.sym),stop:+sp}};
+    return {api:'POST /iserver/account/{cuenta}/orders',p:{orders:[{ticker:base(p.sym),secType:cl==='fx'?'CASH':'STK',orderType:'STP',price:+sp,side,quantity:+qs,tif:'GTC'}]}};}
   if(v==='BN')return {api:'POST /api/v3/order',p:{symbol:id,side,type:'STOP_LOSS',quantity:qs,stopPrice:sp}};
   if(v==='BF')return {api:'POST /fapi/v1/order',p:{symbol:id,side,type:'STOP_MARKET',stopPrice:sp,closePosition:'true',workingType:'CONTRACT_PRICE'}};
   return {api:'POST /exchange (order)',p:{coin:id,isBuy:side==='BUY',sz:qs,reduceOnly:true,trigger:{isMarket:true,triggerPx:sp,tpsl:'sl'}}};
@@ -213,10 +260,14 @@ function logOrder(a,p,kind,side,q,price,fee){
   return o;
 }
 /* el stop vive en el exchange como orden propia: se mueve (cancelar y volver a poner) cuando sube el trailing */
-function syncStop(p){const sp=rp(p.sym,p.stop);if(sp!==p.stop)p.stop=sp;if(!p.sl||p.sl.px!==sp){p.sl={px:sp,moves:p.sl?p.sl.moves+1:0,req:stopTicket(p)};}}
+function syncStop(p){const sp=rp(p.sym,p.stop);if(sp!==p.stop)p.stop=sp;if(!p.sl||p.sl.px!==sp||p.sl.q!==p.qty){p.sl={px:sp,q:p.qty,moves:p.sl?p.sl.moves+1:0,req:stopTicket(p)};}}
 /* financiación de los perpetuos: en cada cobro (cada 8 h en Binance, cada hora en Hyperliquid) el largo paga y el corto cobra si la tasa es positiva, y al revés */
 function fundTick(a){
   const now=Date.now();
+  /* IBKR: no hay perpetuos; los cortos de acciones pagan préstamo (≈0,5 % anual en las fáciles de prestar), cada hora */
+  if(isIB()){for(const p of a.positions){if(!isShort(p)||ibClass(p.sym)!=='stk')continue;if(!p.fAt)p.fAt=p.openedAt;
+      let n=0;while(p.fAt+36e5<=now&&n++<500){p.fAt+=36e5;const amt=-p.qty*(market.price[p.sym]||p.entry)*.005/8760;a.cash+=amt;p.fund=(p.fund||0)+amt;}}
+    return;}
   for(const p of a.positions){const v=srcOf(p.sym);if(v==='BN')continue;
     const f=market.fund&&market.fund[p.sym],iv=(f&&f.iv)||(v==='HL'?36e5:288e5);
     if(!p.fAt)p.fAt=Math.floor(p.openedAt/iv)*iv;
@@ -246,35 +297,39 @@ function kill(a,why){
    pasa, en efectivo, a una cartera aparte y congelada; el agente sigue operando con su capital. En automático no se aparta nada. */
 function sweep(a){
   if(a.parentId!=null||!(S.settings.capNet>0))return;
-  const x=Math.min(a.cash,eq(a)-a.initial);
+  const x=Math.min(freeCash(a),eq(a)-a.initial);
   if(x>=.005){a.cash-=x;a.vault=(a.vault||0)+x;a._vq=(a._vq||0)+x;}
   if(a._vq>=.005&&Date.now()-(a._vt||0)>600000){L(a,'reserve',`A la cartera reservada: +${money(a._vq)} de beneficio (reservado en total ${money(a.vault)}, congelado). El agente sigue operando con su capital de ${money(a.initial)}.`);a._vq=0;a._vt=Date.now();}
 }
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
-function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym);return Math.max(0,posVal(p,price))-f-p.basis+(p.taken||0)+(p.fund||0);}
+function netIfClose(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=feeAmt(p.sym,p.qty,price,!sh);return Math.max(0,posVal(p,price))-f-p.basis+(p.taken||0)+(p.fund||0);}
 /* toma parcial: vende una parte de la posición y guarda lo ganado; la operación sigue siendo una sola en el historial */
 function partialClose(a,p,frac,why){
-  const sh=isShort(p),price=(market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),q=rq(p.sym,p.qty*frac);
+  const sh=isShort(p),price=(market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),q=wholeOnly(p.sym,sh)?Math.floor(p.qty*frac):rq(p.sym,p.qty*frac);
   /* el exchange tiene que aceptar las dos partes: la que se vende y la que queda */
   if(vet(p.sym,q,price)||vet(p.sym,+(p.qty-q).toFixed(12),price))return false;
-  const b=p.basis*q/p.qty,f=q*price*feeOf(p.sym),net=Math.max(0,sh?q*(2*p.entry-price):q*price)-f,pnl=net-b;
+  const b=p.basis*q/p.qty,f=feeAmt(p.sym,q,price,!sh),net=Math.max(0,sh?q*(2*p.entry-price):q*price)-f,pnl=net-b;
   logOrder(a,p,'parcial',sh?'BUY':'SELL',q,price,f);
   if(!p.basis0)p.basis0=p.basis;if(!p.qty0)p.qty0=p.qty;
-  a.cash+=net;p.qty=+(p.qty-q).toFixed(12);p.basis-=b;p.taken=(p.taken||0)+pnl;
+  a.cash+=net;settle(a,p,net);p.qty=+(p.qty-q).toFixed(12);p.basis-=b;p.taken=(p.taken||0)+pnl;
   L(a,'close',`${base(p.sym)}: ${why} · vende la mitad @ ${px(price)} · ${sgn(pnl)} asegurados; el resto sigue con el stop en la entrada`);
   return true;
 }
 function openPos(a,an,P){
   const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
-  if(sh&&!canShort(an.sym))return 'en contado no se puede vender en corto';
+  if(sh&&!canShort(an.sym))return isIB()?'cortos no permitidos en IBKR para este activo o esta cuenta':'en contado no se puede vender en corto';
   const mn=minNot(an.sym);let qty=(e*P.riskPct*T.risk)/stopDist;
   /* con poco capital, cada posición puede llegar al mínimo del exchange aunque supere el % máximo */
-  qty=Math.min(Math.max(qty,mn*1.01/entry),Math.max(e*P.maxPosPct,mn*1.01)/entry,a.cash/(entry*(1+fee)));
-  qty=rq(an.sym,qty);
-  if(qty*entry<mn){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=a.cash&&up*entry<=Math.max(e*P.maxPosPct,mn*1.2))qty=up;}
+  const cash=freeCash(a);
+  qty=Math.min(Math.max(qty,mn*1.01/entry),Math.max(e*P.maxPosPct,mn*1.01)/entry,cash/(entry*(1+fee)));
+  qty=wholeOnly(an.sym,sh)?Math.floor(qty):rq(an.sym,qty);
+  if(qty*entry<mn&&!wholeOnly(an.sym,sh)){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=cash&&up*entry<=Math.max(e*P.maxPosPct,mn*1.2))qty=up;}
+  if(wholeOnly(an.sym,sh)&&qty<1)return 'en corto IBKR solo admite acciones enteras y no cabe ni una';
   const bad=vet(an.sym,qty,entry);if(bad)return bad;
-  const cost=qty*entry,f=cost*fee;a.cash-=cost+f;
+  const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);
+  if(cost+f>cash+1e-9)return `efectivo disponible insuficiente (${money(cash)}${cash<a.cash-.005?', el resto aún se está liquidando':''})`;
+  a.cash-=cost+f;
   const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:rp(an.sym,sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr),risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
   syncStop(p);logOrder(a,p,'abrir',sh?'SELL':'BUY',qty,entry,f);
   a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym],ruleOf(an.sym)?{rule:ruleOf(an.sym)}:{});
@@ -284,8 +339,8 @@ function openPos(a,an,P){
 /* user: 'limit' (tu límite de ganancia) o 'manual' (vendida por ti). Esas ventas no cuentan en el aprendizaje del agente:
    van a tu registro aparte, donde se sigue el precio para saber qué habría hecho el plan del agente */
 function closePos(a,p,reason,at,user){
-  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=p.qty*price*feeOf(p.sym),net=Math.max(0,posVal(p,price))-f,b0=p.basis0||p.basis,pnl=net-p.basis+(p.taken||0)+(p.fund||0);
-  a.cash+=net;a.positions=a.positions.filter(x=>x!==p);logOrder(a,p,'cerrar',sh?'BUY':'SELL',p.qty,price,f);
+  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=feeAmt(p.sym,p.qty,price,!sh),net=Math.max(0,posVal(p,price))-f,b0=p.basis0||p.basis,pnl=net-p.basis+(p.taken||0)+(p.fund||0);
+  a.cash+=net;settle(a,p,net);a.positions=a.positions.filter(x=>x!==p);logOrder(a,p,'cerrar',sh?'BUY':'SELL',p.qty,price,f);
   if(!user){const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/b0;}
   /* recorrido: cuánto llegó a ir a favor (mfe) y en contra (mae), en múltiplos del riesgo inicial (R) */
   const R=p.risk>0?(sh?p.entry-price:price-p.entry)/p.risk:null;
@@ -377,7 +432,8 @@ function xp(sym){const e=S.exp[sym];if(!e||e.n<3)return {adj:0,veto:false,e};con
 function decide(a,an,P,T,pre){
   const sh=an.side==='short';
   if(sh&&!S.settings.shorts)return 'cortos desactivados';
-  if(sh&&!canShort(an.sym))return 'en contado no se puede vender en corto';
+  if(sh&&!canShort(an.sym))return isIB()?(ibClass(an.sym)==='crypto'?'IBKR no permite cortos en cripto':'cortos solo con cuenta de margen (desde $2.000)'):'en contado no se puede vender en corto';
+  if(isIB()&&!ibOK(an.sym))return 'no disponible en IBKR';
   if(!an.trend)return sh?'sin tendencia bajista':'sin tendencia alcista';
   if(!sh&&an.rsi>P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrecomprado`;
   if(!sh&&an.rsi<P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin fuerza`;

@@ -87,7 +87,7 @@ async function bnSpotRules(syms){
 async function uniBN(){
   /* criptomonedas en Binance Futuros (contratos perpetuos): la mitad de comisión que en contado */
   /* si Binance Futuros frena por exceso de peticiones (p. ej. en un servidor con la conexión compartida), las criptos se toman de Binance contado, que tiene su propio límite */
-  if(S.settings.cryptoFut!==false&&!cooling('BF')){
+  if(S.settings.cryptoFut!==false&&S.settings.broker!=='ibkr'&&!cooling('BF')){
     try{
     const [info,t24]=await Promise.all([fget(FAPI+'/fapi/v1/exchangeInfo'),fget(FAPI+'/fapi/v1/ticker/24hr')]);
     const perp=new Set(info.symbols.filter(x=>x.status==='TRADING'&&x.quoteAsset==='USDT'&&x.contractType==='PERPETUAL'&&(x.underlyingType||'COIN')==='COIN').map(x=>x.symbol));
@@ -151,6 +151,8 @@ async function loadUniverse(){
   if(m.HL){if(!cooling('HL'))j2.push(uniHL().catch(e=>fail('HL',e)));}else market.lists.HL=[];
   await Promise.all(j2);
   market.universe=[...market.lists.BN,...market.lists.BF,...market.lists.HL].sort((a,b)=>(market.meta[b].vol||0)-(market.meta[a].vol||0));
+  /* con IBKR solo se vigila lo que IBKR permite operar */
+  if(S.settings.broker==='ibkr')market.universe=market.universe.filter(ibOK);
   market.uniAt=Date.now();
   market.err=Object.values(market.src).some(x=>x.ok)?null:'ninguna fuente responde';
 }
@@ -179,6 +181,8 @@ const IDX_SESS={JP225:'tokyo',NIKKEI:'tokyo',DAX:'xetra',GER40:'xetra',DE40:'xet
 const GRAINS=new Set(['CORN','WHEAT','SOY','SOYBEAN']);
 function sessOf(k){
   if(srcOf(k)==='BN')return '24x7';
+  /* con IBKR: cripto 24 h, divisas en horario de divisas y todo lo demás (acciones, ETF de índices y de materias primas) en horario de la bolsa de EE. UU. */
+  if(S&&S.settings.broker==='ibkr'){const c=catOf(k);return c==='Cripto'?'24x7':c==='Divisas'?'fx':'us';}
   {const m=metaOf(k);if(m&&m.sess)return m.sess;}
   const c=catOf(k),n=base(k);
   if(c==='Cripto')return '24x7';

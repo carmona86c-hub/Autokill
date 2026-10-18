@@ -116,7 +116,7 @@ function renderMode(){
     <div class="pre">${[.05,.1,.15,.2,.5,1].map(v=>`<button class="btn" type="button" data-v="${v}">${c2(v)}</button>`).join('')}</div>
     <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual. Lo que gane por encima de su capital (${money(S.agents[0].initial)}) pasa a la cartera reservada, congelada.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
     '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
-    ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total.</div>`:''}
+    ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total. <button class="btn" type="button" data-unv="1" style="padding:4px 10px;margin-left:4px">Liberar</button></div>`:''}
     ${(()=>{const cs=S.capStudy;if(!cs)return '<div class="lab"><div class="lbl">Estudio de variantes</div><div class="note">En cuanto haya velas suficientes, la app probará varios límites sobre el mercado real reciente y te dirá cuál habría funcionado mejor.</div></div>';
       const real=v=>{const x=labSum('limit',v);return x.n?`${x.n} · ${sgn(x.pnl)}`:'—';};
       return `<div class="lab"><div class="lbl">Estudio de variantes · velas reales recientes</div>
@@ -131,6 +131,7 @@ $('tMode').addEventListener('click',()=>{modeOpen=!modeOpen;if(!modeOpen)modeLim
 async function setCap(v){const r=await act('mode',{cap:v});if(!r.ok)alert(r.msg);modeLim=v!=null;renderMode();}
 $('modeDrop').addEventListener('click',async e=>{
   const b=e.target.closest&&e.target.closest('button');if(!b)return;
+  if(b.dataset.unv){const v=S.agents[0].vault||0;if(!confirm(`¿Devolver los ${money(v)} reservados al capital del agente? Podrá operar con ellos (y también perderlos). Tu patrimonio total no cambia.`))return;const r=await act('unvault',{});if(!r.ok)alert(r.msg);renderMode();updateHero();return;}
   if(b.dataset.m==='auto'){modeLim=false;setCap(null);return;}
   if(b.dataset.m==='lim'){modeLim=true;renderMode();const i=$('capIn2');if(i&&!capV())i.focus();return;}
   if(b.dataset.study){const r=await act('study');if(r&&!r.ok)alert(r.msg);renderMode();return;}

@@ -56,6 +56,11 @@ function applyCmd(c,a){
       if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
       S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Lo que gane por encima de su capital pasa a la cartera reservada (congelada). Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan. Lo ya reservado sigue congelado.');
       S.agents.forEach(checkExits);S.agents.forEach(sweep);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
+    case 'unvault':{const ag=S.agents[0],v=ag&&ag.vault||0;if(!(v>=.01))return no('No hay nada en la cartera reservada.');
+      const x=a.amt==null?v:Math.min(v,Math.round(+a.amt*100)/100);if(!(x>=.01))return no('Pon una cantidad válida.');
+      ag.vault=v-x<.005?0:v-x;moveIn(ag,x);ag.released=(ag.released||0)+x;
+      L(ag,'reserve',`Liberado de la cartera reservada: ${money(x)} vuelven al capital del agente (capital ahora ${money(ag.initial)}${ag.vault>=.005?', quedan reservados '+money(ag.vault):''}). Tu patrimonio total no cambia.`);
+      return ok('Liberados '+money(x)+'. El agente ya opera con '+money(ag.initial)+'.');}
     case 'study':{const r=capStudy(true);return S.capStudy&&r==='hecho'?ok('Estudio actualizado.'):no('No se pudo: '+(r||'el agente no está activo')+'.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}

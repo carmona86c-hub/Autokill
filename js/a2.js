@@ -325,7 +325,8 @@ function decide(a,an,P,T,pre){
   if(sh&&an.rsi<100-P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrevendido`;
   if(sh&&an.rsi>100-P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin presión vendedora`;
   const x=xp(an.sym);if(x.veto)return `experiencia negativa con ${base(an.sym)} (${x.e.w} de ${x.e.n} aciertos, ${sgn(x.e.pnl)})`;
-  const ed=edgeAdj(an);
+  /* dirección y mercado suelen ser las mismas operaciones (en fin de semana, todo cripto): no se resta dos veces */
+  const ed=edgeAdj(an);if(ed.adj<-10)ed.adj=-10;
   if(an.score+x.adj+ed.adj<P.minScore)return `puntuación ${an.score}${x.adj?(x.adj>0?'+':'')+x.adj+' por experiencia':''}${ed.adj?(ed.adj>0?'+':'')+ed.adj+' por resultados recientes ('+ed.why+')':''} < ${P.minScore}`;
   if(an.atrPct<.002)return 'volatilidad demasiado baja para cubrir comisiones';
   if(an.atrPct>.06)return 'volatilidad excesiva';
@@ -342,7 +343,7 @@ function decide(a,an,P,T,pre){
     if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}
     else{
       const sh=an.side==='short',dir=sh?-f.ret:f.ret,agree=sh?1-f.up:f.up;
-      if(agree<.55)return `Kronos no confirma la dirección (${Math.round(agree*100)}% de escenarios a favor)`;
+      if(agree<.5)return `Kronos no confirma la dirección (${Math.round(agree*100)}% de escenarios a favor)`;
       if(dir<costOf(an.sym))return `Kronos prevé poco recorrido (${pct(dir)})`;
       an.kr={ret:dir,up:agree};
     }

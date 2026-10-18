@@ -38,7 +38,7 @@ const pxFresh=(k,ms)=>market.price[k]>0&&Date.now()-(market.pt[k]||0)<ms;
 let instantFails=0,okFetches=0;
 async function fget(url,opt){
   const c=new AbortController(),to=setTimeout(()=>c.abort(),9000),t0=performance.now();
-  try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();okFetches++;return j;}
+  try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok){const er=new Error('HTTP '+r.status);er.retry=+(r.headers&&r.headers.get&&r.headers.get('retry-after')||0);throw er;}const j=await r.json();okFetches++;return j;}
   catch(e){if(e&&e.name==='TypeError'&&performance.now()-t0<60)instantFails++;throw e;}
   finally{clearTimeout(to);}
 }
@@ -58,7 +58,7 @@ function why(e){
   return 'conexión bloqueada';
 }
 /* si una fuente dice "demasiadas peticiones" (429) o bloquea la IP (418), se la deja descansar antes de volver a pedir */
-function fail(src,e){const m=(e&&e.message)||'',cd=/HTTP 418/.test(m)?15*60e3:/HTTP 429/.test(m)?90e3:0,prev=market.src[src]||{};
+function fail(src,e){const m=(e&&e.message)||'',c0=/HTTP 418/.test(m)?15*60e3:/HTTP 429/.test(m)?90e3:0,cd=c0&&e.retry>0?Math.max(c0,e.retry*1000):c0,prev=market.src[src]||{};
   market.src[src]=Object.assign({},prev,{ok:false,err:why(e),cool:cd?Date.now()+cd:prev.cool});}
 const cooling=s=>((market.src[s]||{}).cool||0)>Date.now();
 const BF_CAP=40; /* Binance Futuros ya tiene cientos de contratos TradFi: se vigilan los de más volumen para no pasar el límite de peticiones */
@@ -66,18 +66,21 @@ async function pool(items,n,fn){const q=items.slice();await Promise.all(Array.fr
 
 async function uniBN(){
   /* criptomonedas en Binance Futuros (contratos perpetuos): la mitad de comisión que en contado */
-  if(S.settings.cryptoFut!==false){
+  /* si Binance Futuros frena por exceso de peticiones (p. ej. en un servidor con la conexión compartida), las criptos se toman de Binance contado, que tiene su propio límite */
+  if(S.settings.cryptoFut!==false&&!cooling('BF')){
+    try{
     const [info,t24]=await Promise.all([fget(FAPI+'/fapi/v1/exchangeInfo'),fget(FAPI+'/fapi/v1/ticker/24hr')]);
     const perp=new Set(info.symbols.filter(x=>x.status==='TRADING'&&x.quoteAsset==='USDT'&&x.contractType==='PERPETUAL'&&(x.underlyingType||'COIN')==='COIN').map(x=>x.symbol));
     const list=t24.filter(x=>perp.has(x.symbol)&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0).sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
     market.lists.BN=list.map(x=>{const k='BF:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',sess:'24x7',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
-    ok('BN');return;
+    market.cryptoSpot=false;ok('BN');return;
+    }catch(e){if(!/HTTP (4(18|29)|403|451)/.test((e&&e.message)||''))throw e;fail('BF',e);}
   }
   const t=await jget('/api/v3/ticker/24hr');
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
   market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
-  ok('BN');
+  market.cryptoSpot=S.settings.cryptoFut!==false;ok('BN');
 }
 async function uniBF(){
   const [info,t24]=await Promise.all([fget(FAPI+'/fapi/v1/exchangeInfo'),fget(FAPI+'/fapi/v1/ticker/24hr')]);
@@ -268,10 +271,10 @@ async function fetchKlines(tf){
   const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
-    pool(bin,6,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
-      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=1000`);
-      /* 1000 velas la primera vez (historia para la automejora), y luego solo las nuevas (hasta 99) */
-      else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit='+(catOf(k)==='Cripto'?1000:499)));}
+    pool(bin,3,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
+      if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=500`);
+      /* 499 velas la primera vez (cuestan menos de la mitad que 1000 en el límite de Binance) y luego solo las nuevas (hasta 99) */
+      else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit=499'));}
       }catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail(srcOf(k),e);throw e;}
       store(k,toK(r));}),
     pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':1,'5m':4,'15m':11,'1h':42}[tf]||4)*864e5;

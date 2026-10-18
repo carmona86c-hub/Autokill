@@ -112,6 +112,8 @@ async function main() {
   if (prev) { storage.set(LS_KEY, prev); log('Estado recuperado de GitHub (' + prev.length + ' bytes).'); }
   else log(TOKEN ? 'Sin estado previo en GitHub: arranca un agente nuevo.' : 'Sin GITHUB_TOKEN: el estado vive solo en memoria.');
   for (const f of ['a1.js', 'a2.js', 'a3.js', 'a4.js', 'a5.js']) run(fs.readFileSync(path.join(WEB, f), 'utf8'));
+  /* dinero real: solo si en Render se pone LIVE_TRADING=si (hoy no). Aun así, el modo real tiene que activarse expresamente */
+  if (process.env.LIVE_TRADING === 'si') { const br = require('./broker'); sandbox.__liveSend = o => br.send(o, log).catch(e => { o.err = e.message; log('Orden real fallida:', e.message); }); log('ATENCIÓN: conector de órdenes reales cargado.'); }
   /* el token de Telegram puede venir de Render, así sobrevive a reinicios sin estar en el repositorio */
   setTimeout(() => {
     try {
@@ -156,7 +158,7 @@ async function handle(req, res) {
       if (KEY && b.key !== KEY) return send(res, 401, { ok: false, msg: 'clave incorrecta' });
       ctx.__cmd = { c: String(b.cmd || ''), a: b.args || {} };
       const r = run('(()=>{const c=__cmd.c,a=__cmd.a,r=applyCmd(c,a);if(r.ok){save(true);if(["scan","capital","settings","import","run"].includes(c)&&S.running)setTimeout(()=>tick(c!=="run"),50);}return r;})()');
-      if (r.ok && ['import', 'capital', 'settings', 'spawn', 'fund', 'prune'].includes(b.cmd)) saveRemote(false);
+      if (r.ok && ['import', 'capital', 'settings', 'spawn', 'fund', 'prune', 'unvault'].includes(b.cmd)) saveRemote(false);
       return send(res, 200, r);
     }
     send(res, 404, { error: 'no existe' });

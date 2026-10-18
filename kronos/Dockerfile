@@ -16,7 +16,7 @@ COPY . /src
 RUN if [ -f /src/app.py ]; then cp /src/app.py /app/app.py; else cp /src/kronos/app.py /app/app.py; fi \
  && mkdir -p /app/web /app/agent \
  && if [ -d /src/js ]; then cp -r /src/js /app/web/js; fi \
- && if [ -f /src/agent/server.js ]; then cp /src/agent/server.js /app/agent/server.js; fi \
+ && if [ -f /src/agent/server.js ]; then cp /src/agent/server.js /src/agent/broker.js /app/agent/ 2>/dev/null || cp /src/agent/server.js /app/agent/server.js; fi \
  && rm -rf /src
 # el agente (Node) y Kronos/API pública (uvicorn); al apagar, el agente guarda su estado antes de salir
 CMD ["sh", "-c", "U=0; N=0; if [ -f /app/agent/server.js ]; then node /app/agent/server.js & N=$!; fi; uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000} & U=$!; trap 'kill -TERM $U $N 2>/dev/null; wait $N' TERM INT; wait $U"]

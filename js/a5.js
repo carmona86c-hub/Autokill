@@ -72,7 +72,7 @@ function applyCmd(c,a){
 }
 /* informe con las etapas anteriores (cada vez que se reinició el saldo) */
 function reportFull(){
-  const r=S.runs||[],ev=healthReport()+evoReport()+labReport()+capReport();if(!r.length)return report()+ev;
+  const r=S.runs||[],ev=healthReport()+execReport()+evoReport()+labReport()+capReport();if(!r.length)return report()+ev;
   return report()+ev+'\nETAPAS ANTERIORES (reinicios de saldo)\n'+r.slice().reverse().map(x=>`  ${new Date(x.from).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.to).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · capital ${money(x.initial)} → ${money(x.final)} (${sgn(x.pnl)}) · ${x.trades} ops${x.trades?' · '+Math.round(x.hit*100)+'% aciertos':''}`).join('\n');
 }
 /* salud del sistema: si gana de verdad y por qué (recorrido de las operaciones) */
@@ -82,6 +82,13 @@ function healthReport(){
   return `\nSALUD DEL SISTEMA (${s.n} operaciones${s.n<100?', muestra aún pequeña: conclusiones poco fiables':''})\n`+
     `  deja de media ${sgn(s.exp)} por operación · gana ${isFinite(s.payoff)?s.payoff.toFixed(2):'∞'} por cada 1 perdido · acierta ${Math.round(s.hit*100)}% y necesita ${Math.round(s.need*100)}%`+
     (c.length?`\n  recorrido (${c.length} con datos): ganadoras llegaron de media a ${avg(wi,x=>x.mfe).toFixed(2)}R · perdedoras a ${avg(lo,x=>x.mfe).toFixed(2)}R a favor antes de perder · ${lo.filter(x=>x.mfe>=1).length} de ${lo.length} perdedoras llegaron a +1R · ${c.filter(x=>x.half).length} con mitad asegurada`:'');
+}
+/* ejecución como en el exchange real: reglas, financiación y las últimas órdenes tal y como se enviarían */
+function execReport(){
+  const o=S.orders||[],c=S.agents[0].closed,fu=c.reduce((t,x)=>t+(x.fund||0),0),by={};o.forEach(x=>{by[x.venue]=(by[x.venue]||0)+1;});
+  return `\nEJECUCIÓN (modo simulación; real desactivado) · reglas del exchange para ${Object.keys(market.rules||{}).length} activos · financiación en directo de ${Object.keys(market.fund||{}).length} perpetuos\n`+
+    `  órdenes registradas: ${o.length}${o.length?' ('+Object.entries(by).map(([k,v])=>v+' '+k).join(', ')+')':''} · financiación cobrada/pagada en operaciones cerradas: ${sgn(fu)}`+
+    (o.length?'\n  Últimas órdenes:\n'+o.slice(0,8).map(x=>`    ${new Date(x.t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} ${x.kind} ${base(x.sym)} → ${x.req.api} ${JSON.stringify(x.req.p)}`).join('\n'):'');
 }
 /* tu registro en el informe: así se puede revisar con Claude si el límite o las ventas manuales compensan */
 function labReport(){
@@ -108,10 +115,10 @@ async function act(c,a){
 /* lo que el servidor manda a los dispositivos que lo miran: estado ligero, precios y estado de las fuentes */
 function exportView(){
   const st=JSON.parse(JSON.stringify(S));if(st.settings.notify){st.settings.notify.hasToken=!!st.settings.notify.token;st.settings.notify.token='';}
-  st.log=st.log.slice(0,150);if(st.lab)st.lab.list=st.lab.list.slice(0,150);
+  st.log=st.log.slice(0,150);if(st.orders)st.orders=st.orders.slice(0,60);if(st.lab)st.lab.list=st.lab.list.slice(0,150);
   st.agents.forEach((a,i)=>{const o=S.agents[i];a._st=stats(o);a.closed=a.closed.slice(0,40);if(a.hist.length>300){const k=Math.ceil(a.hist.length/300);a.hist=a.hist.filter((_,j)=>j%k===0||j===a.hist.length-1);}});
   const keys=new Set([...market.universe,...S.agents.flatMap(a=>a.positions.map(p=>p.sym))]),pick=o=>{const r={};keys.forEach(k=>{if(o[k]!==undefined)r[k]=o[k];});return r;};
-  return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),universe:market.universe,lists:market.lists,src:market.src,err:market.err,ws:{BN:wsLive('BN'),BF:wsLive('BF'),HL:wsLive('HL')}},
+  return {at:Date.now(),S:st,market:{price:pick(market.price),meta:pick(market.meta),rules:pick(market.rules||{}),fund:pick(market.fund||{}),universe:market.universe,lists:market.lists,src:market.src,err:market.err,ws:{BN:wsLive('BN'),BF:wsLive('BF'),HL:wsLive('HL')}},
     kpos:Object.fromEntries(S.agents.flatMap(a=>a.positions).map(p=>{const tf=p.tf||S.settings.tf;return [p.sym+'|'+tf,(kOf(tf,p.sym)||[]).slice(-60).map(x=>[x.t,x.o,x.h,x.l,x.c])];})),
     ui:{radar:ui.radar,summary:ui.summary,reasons:ui.reasons,scanAt:ui.scanAt},KR:{ok:KR.ok,err:KR.err,model:KR.model,ms:KR.ms,at:KR.at,fake:KR.fake,busy:KR.busy,asked:KR.asked}};
 }
@@ -121,7 +128,7 @@ async function pullRemote(){
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
     S=j.S;const now=Date.now();
     market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;
-    Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.err=j.market.err;market.wsv=j.market.ws||{};
+    Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.rules=j.market.rules||{};market.fund=j.market.fund||{};market.err=j.market.err;market.wsv=j.market.ws||{};
     market.kpos={};for(const k in j.kpos||{})market.kpos[k]=j.kpos[k].map(x=>({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}));
     market.src={};for(const k in j.market.src||{})market.src[k]=Object.assign({},j.market.src[k],{at:j.market.src[k].at?now-(j.at-j.market.src[k].at):0});
     Object.assign(ui,j.ui||{});Object.assign(KR,j.KR||{});if(KR.at)KR.at=now-(j.at-KR.at);

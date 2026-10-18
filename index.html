@@ -128,6 +128,7 @@ table{border-collapse:collapse;width:100%;font:12px var(--mono);min-width:430px}
 th,td{text-align:right;padding:6px;border-top:1px solid var(--line);white-space:nowrap}
 th{color:var(--mute);font-weight:500;border-top:0}th:first-child,td:first-child{text-align:left}
 .field{display:grid;gap:4px}
+.pw{position:relative}.pw input{padding-right:46px}.eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:38px;height:34px;border:0;background:none;font-size:18px;cursor:pointer;border-radius:6px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .note{color:var(--mute);font-size:12.5px}
 .const p{margin:6px 0}
@@ -244,7 +245,7 @@ summary{list-style-position:inside}
       <p class="note" style="margin:0 0 8px">El agente puede vivir en tu servidor de Render y operar día y noche aunque cierres la app o apagues el móvil. Este dispositivo pasa a ser la pantalla para verlo y darle órdenes; los cambios que hagas aquí se aplican en el servidor.</p>
       <div class="field" style="gap:10px">
         <div class="field"><label class="lbl" for="rUrl">Dirección del servidor</label><input id="rUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://autokill.onrender.com"></div>
-        <div class="field"><label class="lbl" for="rKey">Clave (solo si la pusiste en Render como AGENT_KEY)</label><input id="rKey" type="password" autocomplete="off" placeholder="opcional"></div>
+        <div class="field"><label class="lbl" for="rKey">Clave (solo si la pusiste en Render como AGENT_KEY)</label><div class="pw"><input id="rKey" type="password" autocomplete="off" placeholder="opcional"><button id="rEye" class="eye" type="button" aria-label="Mostrar clave" aria-pressed="false" onclick="var i=document.getElementById('rKey'),v=i.type==='password';i.type=v?'text':'password';this.setAttribute('aria-pressed',v);this.setAttribute('aria-label',v?'Ocultar clave':'Mostrar clave');this.textContent=v?'🙈':'👁'">👁</button></div></div>
         <button id="rPush" class="btn pri" type="button">Pasar mi agente al servidor</button>
         <div class="row"><button id="rView" class="btn" type="button" style="flex:1">Ver el del servidor</button><button id="rOff" class="btn" type="button" style="flex:1">Usar el de este dispositivo</button></div>
         <p id="rMsg" class="note" style="margin:0"></p>

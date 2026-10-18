@@ -25,7 +25,7 @@ const CAT_IDX=new Set(['XYZ100','US500','SPX','SP500','USA500','NDX','NAS100','N
 const CAT_COM=new Set(['GOLD','SILVER','XAU','XAG','CL','OIL','WTI','BRENT','USOIL','UKOIL','NATGAS','NG','GAS','COPPER','HG','PLATINUM','PLAT','XPT','PALLADIUM','XPD','URANIUM','URNM','CORN','WHEAT','SOY','SOYBEAN','COFFEE','COCOA','SUGAR','COTTON','LUMBER','ALUMINIUM','ALUMINUM','NICKEL','ZINC']);
 const CAT_FX=new Set(['EUR','JPY','GBP','CHF','AUD','CAD','NZD','MXN','CNH','CNY','TRY','BRL','INR','KRW','SEK','NOK','ZAR','EURUSD','USDJPY','GBPUSD','USDCHF','AUDUSD','USDCAD','DXY','USDX']);
 let S=null;
-const market={price:{},pt:{},k:{},meta:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
+const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
 const ui={radar:[],summary:'',reasons:'',scanAt:0};
 const srcOf=k=>k.slice(0,2),idOf=k=>k.slice(3);
 /* datos de cada activo: los del mercado y, para posiciones abiertas, una copia guardada (sobrevive a recargas) */
@@ -64,6 +64,26 @@ const cooling=s=>((market.src[s]||{}).cool||0)>Date.now();
 const BF_CAP=40; /* Binance Futuros ya tiene cientos de contratos TradFi: se vigilan los de más volumen para no pasar el límite de peticiones */
 async function pool(items,n,fn){const q=items.slice();await Promise.all(Array.from({length:Math.min(n,q.length)},async()=>{while(q.length){const it=q.shift();try{await fn(it);}catch(e){}}}));}
 
+/* ---------- reglas reales de cada exchange ----------
+   Cada orden simulada respeta lo mismo que exigiría el exchange de verdad: paso de cantidad, cantidad mínima,
+   importe mínimo y paso de precio. Y los perpetuos pagan o cobran la financiación real cada 8 h (Binance) o cada hora (Hyperliquid). */
+function bnRules(info,pre){
+  for(const x of info.symbols||[]){const f={};(x.filters||[]).forEach(y=>f[y.filterType]=y);
+    const lot=(f.MARKET_LOT_SIZE&&+f.MARKET_LOT_SIZE.stepSize>0)?f.MARKET_LOT_SIZE:f.LOT_SIZE||{},mn=f.NOTIONAL||f.MIN_NOTIONAL||{};
+    market.rules[pre+x.symbol]={step:+lot.stepSize||0,minQty:+lot.minQty||0,maxQty:+lot.maxQty||0,minNot:+(mn.minNotional||mn.notional)||5,tick:+(f.PRICE_FILTER||{}).tickSize||0,venue:pre==='BN:'?'Binance contado':'Binance Futuros'};}
+  market.rulesAt[pre]=Date.now();
+}
+/* financiación de los perpetuos de Binance (todos de una vez); los que cobran cada 4 h vienen en fundingInfo */
+async function bfFunding(){
+  try{const [pi,fi]=await Promise.all([fget(FAPI+'/fapi/v1/premiumIndex'),fget(FAPI+'/fapi/v1/fundingInfo').catch(()=>[])]);
+    const iv={};(fi||[]).forEach(x=>{if(+x.fundingIntervalHours>0)iv[x.symbol]=x.fundingIntervalHours*36e5;});
+    (pi||[]).forEach(x=>{const r=+x.lastFundingRate;if(isFinite(r))market.fund['BF:'+x.symbol]={rate:r,iv:iv[x.symbol]||288e5,next:+x.nextFundingTime||0,at:Date.now()};});}catch(e){}
+}
+/* reglas de Binance contado: solo de las criptos vigiladas, cada 6 h */
+async function bnSpotRules(syms){
+  if(!syms.length||Date.now()-(market.rulesAt['BN:']||0)<6*3600e3&&syms.every(s=>market.rules['BN:'+s]))return;
+  try{bnRules(await jget('/api/v3/exchangeInfo?symbols='+encodeURIComponent(JSON.stringify(syms))),'BN:');}catch(e){}
+}
 async function uniBN(){
   /* criptomonedas en Binance Futuros (contratos perpetuos): la mitad de comisión que en contado */
   /* si Binance Futuros frena por exceso de peticiones (p. ej. en un servidor con la conexión compartida), las criptos se toman de Binance contado, que tiene su propio límite */
@@ -73,6 +93,7 @@ async function uniBN(){
     const perp=new Set(info.symbols.filter(x=>x.status==='TRADING'&&x.quoteAsset==='USDT'&&x.contractType==='PERPETUAL'&&(x.underlyingType||'COIN')==='COIN').map(x=>x.symbol));
     const list=t24.filter(x=>perp.has(x.symbol)&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0).sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
     market.lists.BN=list.map(x=>{const k='BF:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',sess:'24x7',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
+    bnRules(info,'BF:');await bfFunding();
     market.cryptoSpot=false;ok('BN');return;
     }catch(e){if(!/HTTP (4(18|29)|403|451)/.test((e&&e.message)||''))throw e;fail('BF',e);}
   }
@@ -80,6 +101,7 @@ async function uniBN(){
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
   market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
+  await bnSpotRules(list.map(x=>x.symbol));
   market.cryptoSpot=S.settings.cryptoFut!==false;ok('BN');
 }
 async function uniBF(){
@@ -95,7 +117,7 @@ async function uniBF(){
     const sess={HK_EQUITY:'hk',KR_EQUITY:'krx',CN_EQUITY:'shanghai'}[ut];
     const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess,o24:vol[x.symbol][2]};setPx(k,vol[x.symbol][1]);out.push(k);
   });
-  market.lists.BF=out.sort((a,b)=>market.meta[b].vol-market.meta[a].vol).slice(0,BF_CAP);ok('BF');
+  market.lists.BF=out.sort((a,b)=>market.meta[b].vol-market.meta[a].vol).slice(0,BF_CAP);bnRules(info,'BF:');if(!S.settings.markets.BN||S.settings.cryptoFut===false)await bfFunding();ok('BF');
 }
 async function uniHL(){
   const dexes=(await hl({type:'perpDexs'})||[]).filter(Boolean).map(d=>d.name).filter(Boolean);
@@ -109,6 +131,9 @@ async function uniHL(){
       if(!p||v<20000)return;
       const cat=CAT_IDX.has(name)?'Índices':CAT_COM.has(name)?'Materias primas':CAT_FX.has(name)?'Divisas':cryptoNames.has(name)?'Cripto':'Acciones';
       if(cat==='Cripto'&&S.settings.markets.BN)return; /* ya la cubre Binance */
+      /* Hyperliquid: la cantidad va con szDecimals decimales, el precio con 5 cifras significativas y como mucho 6−szDecimals decimales; orden mínima de $10 */
+      const sz=+u.szDecimals||0;market.rules['HL:'+id]={step:Math.pow(10,-sz),minQty:Math.pow(10,-sz),minNot:10,sig:5,maxDec:Math.max(0,6-sz),venue:'Hyperliquid'};
+      if(isFinite(+c.funding))market.fund['HL:'+id]={rate:+c.funding,iv:36e5,at:Date.now()};
       if(!best[name]||best[name].v<v)best[name]={id,name,cat,v,p,o24:+c.prevDayPx||0};
     });
     market.hlAt[dex]=Date.now();

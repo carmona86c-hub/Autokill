@@ -18,7 +18,7 @@ async function tick(manual){
     if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
     wsSync();
     /* los stops y objetivos se vigilan siempre, también con el agente en pausa */
-    S.agents.forEach(checkExits);labWatch();
+    S.agents.forEach(a=>{if(a.status==='alive')fundTick(a);});S.agents.forEach(checkExits);labWatch();
     if(act){
       const due=!manual&&now>=nextScan;
       if(due||manual){
@@ -222,10 +222,10 @@ const simCapR=(s,P,i0,i1,cost,shorts,rL)=>simCore(s,P,i0,i1,cost,shorts,rL);
 function capStudy(force){
   const now=Date.now(),cs=S.capStudy;if(!force&&cs&&now-cs.at<3600e3)return cs&&'reciente';
   const a=S.agents[0];if(!a||a.status!=='alive')return null;
-  const P=a.params,ser=[];for(const tf of tfs())for(const k of uni()){const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k),ms:TF_MS[tf]});}
+  const P=a.params,ser=[];for(const tf of tfs())for(const k of uni()){const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k),ms:TF_MS[tf],sh:canShort(k)});}
   if(ser.length<8)return 'aún no hay velas suficientes';
   const cl=S.agents.flatMap(x=>x.closed).slice(0,40),notional=cl.length?cl.reduce((t,x)=>t+x.qty*x.entry,0)/cl.length:Math.max(MIN_NOTIONAL,eq(a)*P.maxPosPct);
-  const run=rL=>{let n=0,w=0,sum=0,min=0;for(const x of ser)simCapR(x.s,P,60,x.s.k.length,x.cost,S.settings.shorts,rL).forEach(o=>{n++;sum+=o.r;if(o.r>0)w++;min+=o.bars*x.ms/60000;});
+  const run=rL=>{let n=0,w=0,sum=0,min=0;for(const x of ser)simCapR(x.s,P,60,x.s.k.length,x.cost,x.sh,rL).forEach(o=>{n++;sum+=o.r;if(o.r>0)w++;min+=o.bars*x.ms/60000;});
     return {n,usd:sum*notional,hit:n?w/n:0,min:n?min/n:0};};
   const plan=run(Infinity),rows=CAP_LIMS.map(l=>Object.assign({lim:l},run(l/notional)));
   const best=rows.filter(r=>r.n>=10).sort((x,y)=>y.usd-x.usd)[0]||null;
@@ -311,7 +311,15 @@ function renderStats(){
   $('trades').innerHTML=a.closed.length?`<table><tr><th>Activo</th><th>Entrada</th><th>Salida</th><th>Resultado</th><th>Motivo</th></tr>${a.closed.slice(0,40).map(t=>`<tr><td>${esc(base(t.sym))}${t.side==='short'?' <span class="side s">corto</span>':''}</td><td>${px(t.entry)}</td><td>${px(t.exit)}</td><td class="${t.pnl>=0?'up':'down'}">${sgn(t.pnl)} ${pct(t.pct,1)}</td><td>${esc(t.reason)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin operaciones cerradas.</div>';
   const ex=Object.entries(S.exp).sort((x,y)=>y[1].n-x[1].n);
   $('expT').innerHTML=ex.length?`<table><tr><th>Activo</th><th>Operaciones</th><th>Aciertos</th><th>Resultado</th><th>Ajuste</th></tr>${ex.map(([sym,e])=>{const x=xp(sym);return `<tr><td>${esc(base(sym))} <span class="note">${catOf(sym)}</span></td><td>${e.n}</td><td>${Math.round(e.w/e.n*100)}%</td><td class="${e.pnl>=0?'up':'down'}">${sgn(e.pnl)}</td><td>${x.veto?'vetado':x.adj?(x.adj>0?'+':'')+x.adj:'—'}</td></tr>`;}).join('')}</table>`:'<div class="empty">Aún sin experiencia: se forma con cada operación cerrada.</div>';
+  renderOrders();
   drawChart(a);
+}
+function renderOrders(){
+  const o=(S.orders||[]).slice(0,25),c=S.agents.flatMap(a=>a.closed),fu=c.reduce((t,x)=>t+(x.fund||0),0)+S.agents.reduce((t,a)=>t+a.positions.reduce((u,p)=>u+(p.fund||0),0),0);
+  const nr=Object.keys(market.rules||{}).length,nf=Object.keys(market.fund||{}).length;
+  $('ordInfo').innerHTML=`Modo: <b>simulación</b> · real: <b>desactivado</b> · reglas del exchange cargadas para ${nr} activos · financiación en directo de ${nf} perpetuos · financiación acumulada <span class="${fu>=0?'up':'down'}">${sgn(fu)}</span>`;
+  const kn={abrir:'abrir',parcial:'vender mitad',cerrar:'cerrar'};
+  $('ordT').innerHTML=o.length?`<table><tr><th>Hora</th><th>Activo</th><th>Orden</th><th>Cantidad</th><th>Precio</th><th>Comisión</th></tr>${o.map(x=>`<tr><td>${new Date(x.t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</td><td>${esc(base(x.sym))}<br><small class="note">${esc(x.venue||'')}</small></td><td>${x.side==='BUY'?'compra':'venta'}<br><small class="note">${kn[x.kind]||x.kind}</small></td><td class="mono">${esc(x.req&&x.req.p?(x.req.p.quantity||x.req.p.sz||x.qty):x.qty)}</td><td>${px(x.price)}</td><td>${money(x.fee||0)}</td></tr>`).join('')}</table>`:'<div class="empty">Aún no hay órdenes desde esta versión.</div>';
 }
 function drawChart(a){
   const cv=$('chart'),dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w)return;

@@ -22,6 +22,9 @@ function migrate(s){
   /* criptomonedas en Binance Futuros (una sola vez): la experiencia de cada cripto pasa a su contrato */
   /* broker IBKR (una sola vez): la simulación sigue sus comisiones, mercados y reglas */
   if(s.settings.broker===undefined){s.settings.broker='ibkr';s.settings.ibPlan='tiered';}
+  /* experiencia por activo: la de la etapa anterior se hizo con otro broker, otras comisiones y las salidas viejas (cortaba las ganancias);
+     con IBKR empieza de cero para no vetar con esos datos los pocos activos disponibles. La anterior queda archivada en expOld (una sola vez) */
+  if(!s.settings.expIB){s.settings.expIB=1;if(Object.keys(s.exp).length){s.expOld=Object.assign({},s.expOld||{},s.exp);s.exp={};}}
   if(s.settings.cryptoFut===undefined){s.settings.cryptoFut=true;for(const k in s.exp)if(k.startsWith('BN:')){const nk='BF:'+k.slice(3),a=s.exp[k],b=s.exp[nk]||{n:0,w:0,pnl:0,sumPct:0};s.exp[nk]={n:a.n+b.n,w:a.w+b.w,pnl:a.pnl+b.pnl,sumPct:(a.sumPct||0)+(b.sumPct||0)};}}
   return s;
 }
@@ -201,10 +204,15 @@ function feeAmt(k,q,price,sell){
   if(S.settings.ibPlan==='fixed')return Math.min(Math.max(.005*q,1),.01*V)+reg;
   return Math.min(Math.max(.0035*q,.35),.01*V)+.003*q+Math.min(.0002*q,.005*V)+reg; /* escalonada: comisión + bolsa + compensación */
 }
-/* coste por unidad con el tamaño habitual de posición: con mínimos por orden, las posiciones pequeñas pagan mucho más en proporción */
+/* tamaño máximo de una posición. Con IBKR, si el % habitual deja la orden tan pequeña que la comisión mínima se come la ganancia,
+   la posición sube hasta un tamaño eficiente (cripto ~$700, acciones ~$350, divisas ~$10.000), como mucho la mitad del capital.
+   El riesgo no cambia: lo sigue marcando el stop (riesgo por operación), solo hay menos posiciones y más grandes. */
+const IB_EFF={crypto:700,stk:350,fx:10000};
+function posCap(k,e,P){const b=e*P.maxPosPct;return isIB()?Math.max(b,Math.min(e*.5,IB_EFF[ibClass(k)]||0)):b;}
+/* coste por unidad con el tamaño que tendría la posición: con mínimos por orden, las posiciones pequeñas pagan mucho más en proporción */
 function feeOf(k){
   if(!isIB())return feeRate0(k);
-  const a=S.agents[0],n=Math.max(minNot(k),(a?eq(a):1000)*((a&&a.params.maxPosPct)||.08)),p0=market.price[k]||100;
+  const a=S.agents[0],P=(a&&a.params)||DEF_PARAMS,n=Math.max(minNot(k),posCap(k,a?eq(a):1000,P)),p0=market.price[k]||100;
   return feeAmt(k,n/p0,p0,true)/n;
 }
 /* ---------- como en el exchange real ----------
@@ -322,9 +330,10 @@ function openPos(a,an,P){
   const mn=minNot(an.sym);let qty=(e*P.riskPct*T.risk)/stopDist;
   /* con poco capital, cada posición puede llegar al mínimo del exchange aunque supere el % máximo */
   const cash=freeCash(a);
-  qty=Math.min(Math.max(qty,mn*1.01/entry),Math.max(e*P.maxPosPct,mn*1.01)/entry,cash/(entry*(1+fee)));
+  const cap=posCap(an.sym,e,P);
+  qty=Math.min(Math.max(qty,mn*1.01/entry),Math.max(cap,mn*1.01)/entry,cash/(entry*(1+fee)));
   qty=wholeOnly(an.sym,sh)?Math.floor(qty):rq(an.sym,qty);
-  if(qty*entry<mn&&!wholeOnly(an.sym,sh)){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=cash&&up*entry<=Math.max(e*P.maxPosPct,mn*1.2))qty=up;}
+  if(qty*entry<mn&&!wholeOnly(an.sym,sh)){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=cash&&up*entry<=Math.max(cap,mn*1.2))qty=up;}
   if(wholeOnly(an.sym,sh)&&qty<1)return 'en corto IBKR solo admite acciones enteras y no cabe ni una';
   const bad=vet(an.sym,qty,entry);if(bad)return bad;
   const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);

@@ -336,6 +336,8 @@ function openPos(a,an,P){
   if(qty*entry<mn&&!wholeOnly(an.sym,sh)){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=cash&&up*entry<=Math.max(cap,mn*1.2))qty=up;}
   if(wholeOnly(an.sym,sh)&&qty<1)return 'en corto IBKR solo admite acciones enteras y no cabe ni una';
   const bad=vet(an.sym,qty,entry);if(bad)return bad;
+  /* la comisión real puede ser algo mayor que la estimada (mínimo por orden): si no cabe, se ajusta la cantidad al efectivo disponible */
+  {const f0=feeAmt(an.sym,qty,entry,sh);if(qty*entry+f0>cash&&!wholeOnly(an.sym,sh)){qty=rq(an.sym,Math.max(0,cash-f0-1e-6)/entry);const b2=vet(an.sym,qty,entry);if(b2)return b2;}}
   const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);
   if(cost+f>cash+1e-9)return `efectivo disponible insuficiente (${money(cash)}${cash<a.cash-.005?', el resto aún se está liquidando':''})`;
   a.cash-=cost+f;

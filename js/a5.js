@@ -2,7 +2,7 @@
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=s.broker==='ibkr'?'ibkr':'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -16,7 +16,9 @@ function applySettings(o){
   if(isFinite(o.maxKids)&&o.maxKids>=0&&o.maxKids<=5)s.maxKids=o.maxKids;
   if('repl' in o)s.repl=!!o.repl;if('shorts' in o)s.shorts=!!o.shorts;
   if('cryptoFut' in o&&!!o.cryptoFut!==(s.cryptoFut!==false)){s.cryptoFut=!!o.cryptoFut;market.uniAt=0;}
-  if(o.broker&&o.broker!==s.broker&&['ibkr','ex'].includes(o.broker)){s.broker=o.broker;market.uniAt=0;market.universe=[];L(null,'info',o.broker==='ibkr'?'Broker: IBKR. La simulación usa sus comisiones, sus mercados y sus reglas.':'Broker: exchanges (Binance y Hyperliquid directamente).');}
+  if(o.broker&&o.broker!==s.broker&&['ibkr','mix','ex'].includes(o.broker)){const was=s.broker;s.broker=o.broker;market.uniAt=0;market.universe=[];
+    if(o.broker==='mix'){if(!(s.split>=0))s.split=.7;S.agents.forEach(a=>{a.vr={IB:0,BN:0};a.positions.forEach(p=>{if(!p.ven)p.ven=was==='ex'&&catOf(p.sym)==='Cripto'?'BN':'IB';});});S.route=null;}
+    L(null,'info',o.broker==='ibkr'?'Broker: IBKR. La simulación usa sus comisiones, sus mercados y sus reglas.':o.broker==='mix'?`Broker: IBKR + Binance. Acciones, ETF y divisas en IBKR; cada orden de cripto va al que le salga más barato (Binance contado o IBKR). Saldo repartido: ${Math.round(s.split*100)} % en IBKR y ${Math.round((1-s.split)*100)} % en Binance; la app irá recomendando el reparto.`:'Broker: exchanges (Binance y Hyperliquid directamente).');}
   if(o.ibPlan&&['tiered','fixed'].includes(o.ibPlan))s.ibPlan=o.ibPlan;
   if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
@@ -63,6 +65,12 @@ function applyCmd(c,a){
       ag.vault=v-x<.005?0:v-x;moveIn(ag,x);ag.released=(ag.released||0)+x;
       L(ag,'reserve',`Liberado de la cartera reservada: ${money(x)} vuelven al capital del agente (capital ahora ${money(ag.initial)}${ag.vault>=.005?', quedan reservados '+money(ag.vault):''}). Tu patrimonio total no cambia.`);
       return ok('Liberados '+money(x)+'. El agente ya opera con '+money(ag.initial)+'.');}
+    case 'split':{if(!isMix())return no('El reparto solo se usa con el bróker «IBKR + Binance».');const v=Math.round(+a.share*100)/100;if(!(v>=0&&v<=1))return no('Pon un porcentaje entre 0 y 100.');
+      const old=splitIB();if(Math.abs(v-old)<.005)return ok('Sin cambios.');const tot=S.agents.reduce((t,x)=>t+(x.status==='alive'?eq(x):0),0);
+      S.settings.split=v;S.agents.forEach(x=>{x.vr={IB:0,BN:0};});const R=routeOf();R.miss={IB:0,BN:0};R.advAt=Date.now();
+      const mv=Math.abs(v-old)*tot,to=v>old?'IBKR':'Binance',fr=v>old?'Binance':'IBKR';
+      L(null,'info',`Reparto cambiado: ${Math.round(v*100)} % en IBKR y ${Math.round((1-v)*100)} % en Binance (antes ${Math.round(old*100)} / ${Math.round((1-old)*100)}). En real equivale a pasar unos ${money(mv)} de ${fr} a ${to}.`);
+      return ok(`Reparto aplicado. En real: pasa unos ${money(mv)} de ${fr} a ${to}.`);}
     case 'study':{const r=capStudy(true);return S.capStudy&&r==='hecho'?ok('Estudio actualizado.'):no('No se pudo: '+(r||'el agente no está activo')+'.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
     case 'improve':{const r=alive().map(x=>x.name+': '+(selfImprove(x,true)||'—'));return ok('Automejora ejecutada. '+r.join(' · '));}

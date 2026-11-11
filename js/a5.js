@@ -161,8 +161,41 @@ function renderBan(){
     $('netCopy').hidden=true;
   }
 }
+/* ---------- vigilancia del servidor 24/7 ----------
+   Si el servidor de Render se duerme o lo suspenden, el agente deja de operar sin avisar. Aquí se detecta y se dice en grande,
+   con la hora del último guardado del agente (se lee del repositorio público, rama «estado») y un botón para despertarlo. */
+const GH_STATE='carmona86c-hub/Autokill';
+const SRV={ghAt:0,ghSave:0,warned:0,waking:false};
+async function ghLastSave(){
+  if(Date.now()-SRV.ghAt<10*60e3)return SRV.ghSave;SRV.ghAt=Date.now();
+  try{const j=await fget('https://api.github.com/repos/'+GH_STATE+'/commits?sha=estado&per_page=1');const d=j&&j[0]&&j[0].commit&&j[0].commit.committer&&j[0].commit.committer.date;SRV.ghSave=d?Date.parse(d):0;}catch(e){}
+  return SRV.ghSave;
+}
+const agoTxt=ms=>{const m=Math.round(ms/60000);return m<60?m+' min':m<2880?Math.round(m/60)+' h':Math.round(m/1440)+' días';};
+function srvDown(){
+  if(!REM.on)return null;
+  if(remErr)return 'no responde ('+remErr+')';
+  if(remAt&&Date.now()-remAt>3*60e3)return 'no responde desde hace '+agoTxt(Date.now()-remAt);
+  if(S&&S.running&&S.lastSeen&&Date.now()-S.lastSeen>15*60e3)return 'responde, pero el agente lleva '+agoTxt(Date.now()-S.lastSeen)+' sin revisar el mercado';
+  return null;
+}
+function renderSrv(){
+  const why=srvDown();$('srvBan').hidden=!why;if(!why){SRV.warned=0;return;}
+  const g=SRV.ghSave,last=g?' Último guardado del agente: hace '+agoTxt(Date.now()-g)+' ('+clock(g)+').':'';
+  $('srvMsg').textContent='El servidor '+why+'. Mientras tanto no se abre ni se cierra ninguna operación y los stops no se vigilan.'+last+
+    ' Si «Despertar» no lo arranca, el plan gratuito de Render lo ha suspendido (750 h al mes para todos tus servicios): entra en Render, abre «autokill» y pulsa Resume o Manual Deploy.';
+  ghLastSave().then(v=>{if(v&&v!==g)renderSrv();});
+  if(!SRV.warned){SRV.warned=Date.now();const t='⚠️ Automaton: el servidor 24/7 '+why+'. El agente no está operando.';sysPost(t);tgPost(t);}
+}
+$('srvWake').addEventListener('click',async()=>{
+  if(SRV.waking)return;SRV.waking=true;const b=$('srvWake');b.textContent='Despertando… (hasta 1 min)';
+  const c=new AbortController(),to=setTimeout(()=>c.abort(),90000);
+  try{await fetch(cleanUrl(REM.url)+'/agent/health',{signal:c.signal});await pullRemote();$('srvMsg').textContent='Servidor despierto: el agente vuelve a operar.';}
+  catch(e){$('srvMsg').textContent='No ha despertado. Lo más probable es que Render lo haya suspendido: entra en Render, abre «autokill» y pulsa Resume o Manual Deploy. Cuando esté en marcha, esta alerta desaparece sola.';}
+  finally{clearTimeout(to);SRV.waking=false;b.textContent='Despertar el servidor';render();}
+});
 function render(){
-  updateHero();renderBan();
+  updateHero();renderBan();renderSrv();
   if(tab==='panel')renderPanel();else if(tab==='log')renderLog();else if(tab==='stats')renderStats();else if(tab==='lin')renderLin();else if(tab==='set'&&REM.on)renderRem();
 }
 function show(t){

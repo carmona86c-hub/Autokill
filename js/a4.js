@@ -18,7 +18,7 @@ async function tick(manual){
     if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}
     wsSync();
     /* los stops y objetivos se vigilan siempre, también con el agente en pausa */
-    S.agents.forEach(a=>{if(a.status==='alive')fundTick(a);});S.agents.forEach(checkExits);labWatch();
+    S.agents.forEach(a=>{if(a.status==='alive')fundTick(a);});S.agents.forEach(checkExits);labWatch();routeTrack();
     if(act){
       const due=!manual&&now>=nextScan;
       if(due||manual){
@@ -315,14 +315,31 @@ function renderStats(){
   $('trades').innerHTML=a.closed.length?`<table><tr><th>Activo</th><th>Entrada</th><th>Salida</th><th>Resultado</th><th>Motivo</th></tr>${a.closed.slice(0,40).map(t=>`<tr><td>${esc(base(t.sym))}${t.side==='short'?' <span class="side s">corto</span>':''}</td><td>${px(t.entry)}</td><td>${px(t.exit)}</td><td class="${t.pnl>=0?'up':'down'}">${sgn(t.pnl)} ${pct(t.pct,1)}</td><td>${esc(t.reason)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin operaciones cerradas.</div>';
   const ex=Object.entries(S.exp).sort((x,y)=>y[1].n-x[1].n);
   $('expT').innerHTML=ex.length?`<table><tr><th>Activo</th><th>Operaciones</th><th>Aciertos</th><th>Resultado</th><th>Ajuste</th></tr>${ex.map(([sym,e])=>{const x=xp(sym);return `<tr><td>${esc(base(sym))} <span class="note">${catOf(sym)}</span></td><td>${e.n}</td><td>${Math.round(e.w/e.n*100)}%</td><td class="${e.pnl>=0?'up':'down'}">${sgn(e.pnl)}</td><td>${x.veto?'vetado':x.adj?(x.adj>0?'+':'')+x.adj:'—'}</td></tr>`;}).join('')}</table>`:'<div class="empty">Aún sin experiencia: se forma con cada operación cerrada.</div>';
-  renderOrders();
+  renderOrders();renderRoute();
   drawChart(a);
 }
+/* reparto entre brókers (modo IBKR + Binance): cuánto hay en cada uno, cuánto está metido, el ahorro y el reparto recomendado */
+function renderRoute(){
+  const box=$('routeCard');if(!box)return;box.hidden=!isMix();if(!isMix())return;
+  const R=routeOf(),ad=routeAdvice(),ags=S.agents.filter(x=>x.status==='alive'),cur=splitIB();
+  const row=v=>{const tot=ags.reduce((t,x)=>t+vtot(x,v),0),free=ags.reduce((t,x)=>t+freeV(x,v),0),inp=ags.reduce((t,x)=>t+x.positions.filter(p=>(p.ven||venOf(p.sym))===v).reduce((u,p)=>u+p.basis,0),0);
+    const c=S.agents.flatMap(x=>x.closed).filter(x=>!x.user&&x.ven===v),pl=c.reduce((t,x)=>t+x.pnl,0);
+    return `<tr><td><b>${VN[v]}</b></td><td>${Math.round((v==='IB'?cur:1-cur)*100)} %</td><td>${money(tot)}</td><td>${money(inp)}</td><td>${money(free)}</td><td>${money(R.peak[v])}</td><td>${R.opens[v]}</td><td class="${pl>=0?'up':'down'}">${c.length?sgn(pl):'—'}</td></tr>`;};
+  const diff=ad.ready&&Math.round(Math.abs(ad.share-cur)*100)>=1,tot=ad.tot,cap=t=>t.charAt(0).toUpperCase()+t.slice(1);
+  $('routeInfo').innerHTML=`<div class="tw"><table><tr><th>Bróker</th><th>Reparto</th><th>Tiene</th><th>En posiciones</th><th>Libre</th><th>Máx. a la vez</th><th>Órdenes</th><th>Resultado</th></tr>${row('IB')+row('BN')}</table></div>
+    <p class="note" style="margin:8px 0 0">Ahorro por elegir el más barato: <b class="${R.saved>=0?'up':'down'}">${sgn(R.saved)}</b> en ${R.nSaved} órdenes que podían ir a los dos.${R.miss.IB+R.miss.BN?` Le faltó dinero para entrar ${R.miss.IB} veces en IBKR y ${R.miss.BN} en Binance.`:''}</p>
+    <p class="note" style="margin:8px 0 0">${ad.ready?`<b>Recomendado: ${Math.round(ad.share*100)} % en IBKR (${money(tot*ad.share)}) y ${Math.round((1-ad.share)*100)} % en Binance (${money(tot*(1-ad.share))}).</b> ${esc(cap(ad.why))}.${diff?'':' Coincide con el reparto actual.'}`:'Reparto recomendado: '+esc(ad.why)+'.'} Es un cálculo con datos pasados, no una garantía.</p>
+    <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">${diff?`<button class="btn pri" type="button" data-split="${ad.share}">Aplicar ${Math.round(ad.share*100)} / ${Math.round((1-ad.share)*100)}</button>`:''}
+      <input id="splitIn" type="number" min="0" max="100" step="5" inputmode="numeric" value="${Math.round(cur*100)}" aria-label="Porcentaje en IBKR" style="width:80px"><button class="btn" type="button" data-split="in">Poner este % en IBKR</button></div>
+    <p class="note" style="margin:8px 0 0">En real, el dinero no puede estar en los dos a la vez: aplicar un reparto equivale a una transferencia entre IBKR y Binance que harías tú. Para pasar a real con lo simulado, pon en cada uno al menos su «máx. a la vez».</p>`;
+}
+$('routeInfo')&&$('routeInfo').addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('button[data-split]');if(!b)return;
+  const v=b.dataset.split==='in'?(parseFloat($('splitIn').value)||0)/100:+b.dataset.split;const r=await act('split',{share:v});if(r&&r.msg)$('routeMsg').textContent=r.msg;renderRoute();});
 function renderOrders(){
   const o=(S.orders||[]).slice(0,25),c=S.agents.flatMap(a=>a.closed),fu=c.reduce((t,x)=>t+(x.fund||0),0)+S.agents.reduce((t,a)=>t+a.positions.reduce((u,p)=>u+(p.fund||0),0),0);
   const nr=Object.keys(market.rules||{}).length,nf=Object.keys(market.fund||{}).length;
   const ib=isIB(),pend=S.agents.reduce((t,a)=>t+a.cash-freeCash(a),0);
-  $('ordInfo').innerHTML=`Broker: <b>${ib?'IBKR · '+(S.settings.ibPlan==='fixed'?'tarifa fija':'tarifa escalonada')+' · '+(marginOK()?'cuenta de margen':'cuenta de efectivo (sin cortos)'):'exchanges (Binance y Hyperliquid)'}</b> · modo: <b>simulación</b> · real: <b>desactivado</b>${ib?(pend>.005?` · pendiente de liquidar ${money(pend)}`:''):` · reglas del exchange cargadas para ${nr} activos · financiación en directo de ${nf} perpetuos`} · ${ib?'préstamo de cortos':'financiación'} acumulado <span class="${fu>=0?'up':'down'}">${sgn(fu)}</span>`;
+  $('ordInfo').innerHTML=`Broker: <b>${isMix()?'IBKR + Binance (cada orden al más barato) · ':''}${ib?'IBKR · '+(S.settings.ibPlan==='fixed'?'tarifa fija':'tarifa escalonada')+' · '+(marginOK()?'cuenta de margen':'cuenta de efectivo (sin cortos)'):'exchanges (Binance y Hyperliquid)'}</b> · modo: <b>simulación</b> · real: <b>desactivado</b>${ib?(pend>.005?` · pendiente de liquidar ${money(pend)}`:''):` · reglas del exchange cargadas para ${nr} activos · financiación en directo de ${nf} perpetuos`} · ${ib?'préstamo de cortos':'financiación'} acumulado <span class="${fu>=0?'up':'down'}">${sgn(fu)}</span>`;
   const kn={abrir:'abrir',parcial:'vender mitad',cerrar:'cerrar'};
   $('ordT').innerHTML=o.length?`<table><tr><th>Hora</th><th>Activo</th><th>Orden</th><th>Cantidad</th><th>Precio</th><th>Comisión</th></tr>${o.map(x=>`<tr><td>${new Date(x.t).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</td><td>${esc(base(x.sym))}<br><small class="note">${esc(x.venue||'')}</small></td><td>${x.side==='BUY'?'compra':'venta'}<br><small class="note">${kn[x.kind]||x.kind}</small></td><td class="mono">${esc(x.req&&x.req.p?(x.req.p.quantity||x.req.p.sz||x.qty):x.qty)}</td><td>${px(x.price)}</td><td>${money(x.fee||0)}</td></tr>`).join('')}</table>`:'<div class="empty">Aún no hay órdenes desde esta versión.</div>';
 }

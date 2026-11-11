@@ -381,7 +381,80 @@ function evoReport(){
     const f=t=>new Date(t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     lines.push(`  ${a.name}: reglas v${ev.ver}${ev.check?` · última revisión ${f(ev.check.at)} (${ev.check.tried} variantes, ${ev.check.series} series)`:' · aún sin revisar'}`);
     ev.hist.slice(0,6).forEach(h=>lines.push(h.rollback?`    ${f(h.at)} v${h.ver}: deshecha (en real ${pct(h.live)} por operación en ${h.n} ops)`:`    ${f(h.at)} v${h.ver}: ${h.ch} · prueba ${pct(h.before)} → ${pct(h.after)} (${h.n} ops)`));});
-  if(!lines.length)return '';
+  if(!lines.length)return protReport();
   edgeC.at=0;const e=Object.entries(edgeAdj({sym:'',side:'long'})&&edgeC.m).filter(([,v])=>v).map(([k,v])=>`${k.slice(2).replace('long','largos').replace('short','cortos')} ${v>0?'+':''}${v}`).join(', ');
-  return '\nAUTOMEJORA\n'+lines.join('\n')+'\n  Ajuste por resultados recientes: '+(e||'ninguno (aún sin suficientes operaciones o resultados neutros)');
+  return '\nAUTOMEJORA\n'+lines.join('\n')+'\n  Ajuste por resultados recientes: '+(e||'ninguno (aún sin suficientes operaciones o resultados neutros)')+protReport();
+}
+
+/* ---------- protecciones: tipo de mercado, momentos peligrosos y pausa de lo que no funciona ----------
+   Se añaden como filtros finales de cada entrada (decide) y como ajuste del tamaño (openPos), sin tocar las reglas del agente. */
+/* fechas oficiales: decisiones de la Reserva Federal (federalreserve.gov) y dato de inflación IPC (bls.gov, 8:30 de Nueva York) */
+const PROT_EV=[['2026-12-09','fomc'],['2027-01-27','fomc'],['2026-12-10','cpi'],['2027-01-13','cpi'],['2027-02-11','cpi'],['2027-03-10','cpi'],['2027-04-13','cpi']];
+const etP=t=>parts(t,'America/New_York');
+const isStk=k=>!['Cripto','Divisas','Materias primas'].includes(catOf(k));
+/* momentos peligrosos conocidos: la Fed decide a las 14:00 de Nueva York (y explica a las 14:30); el IPC sale a las 8:30, antes de abrir la bolsa */
+function evNow(k,t){const p=etP(t);for(const [d,e] of PROT_EV){if(d!==p.y)continue;
+  if(e==='fomc'&&p.m>=825&&p.m<930)return 'reunión de la Reserva Federal (decisión de tipos a las 14:00 de Nueva York)';
+  if(e==='cpi'&&(catOf(k)==='Cripto'?p.m>=495&&p.m<570:p.m>=570&&p.m<630))return 'dato de inflación de EE. UU. (IPC) recién publicado';}
+  return null;}
+/* eficiencia del movimiento en las últimas 20 velas: 1 = va derecho en una dirección, cerca de 0 = sube y baja sin ir a ningún sitio */
+function effOf(c,n=20){if(!c||c.length<n+1)return null;const a=c.slice(-n-1);let s=0;for(let i=1;i<a.length;i++)s+=Math.abs(a[i].c-a[i-1].c);return s>0?Math.abs(a[a.length-1].c-a[0].c)/s:0;}
+/* nerviosismo: rango medio de las 14 últimas velas frente al de las 100 últimas */
+function nervOf(c){if(!c||c.length<100)return null;const r=x=>(x.h-x.l)/x.c,m=a=>a.reduce((t,x)=>t+r(x),0)/a.length,b=m(c.slice(-100));return b>0?m(c.slice(-14))/b:null;}
+/* día de noticias (resultados de la empresa u otra noticia): la acción abre hoy con un salto de más del 4 % sobre el cierre anterior */
+const gapC={};
+function gapOf(k){const p=etP(Date.now()),ck=k+'|'+p.y;if(ck in gapC)return gapC[ck];const c=kOf('1h',k)||kOf(S.settings.tf,k);if(!c||c.length<10)return null;
+  let i=c.length-1;while(i>0&&etP(c[i].t).y===p.y)i--;if(i>=c.length-1||etP(c[i+1].t).y!==p.y)return null;
+  const g=c[i+1].o/c[i].c-1;if(Object.keys(gapC).length>500)for(const x in gapC)delete gapC[x];return gapC[ck]=g;}
+/* referencia de la bolsa: el Nasdaq (QQQ o su contrato) en velas de 1 h */
+let ndxC={at:0,v:null};
+function ndxTrend(P){if(Date.now()-ndxC.at<60000)return ndxC.v;const k=uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(base(x).toUpperCase())),an=k&&analyze(k,P,'1h');
+  ndxC={at:Date.now(),v:an?(an.trend?'up':an.short.trend?'down':null):null,k};return ndxC.v;}
+/* pausa de lo que no funciona: tipo de operación = mercado + dirección + velas. Si en sus últimas operaciones (al menos 8) pierde de forma clara
+   (media negativa y t < −1,5: no es mala suerte), se pausa 48 h; luego vuelve a prueba con la mitad de riesgo. Si en 5 operaciones de prueba
+   sigue perdiendo, se pausa el doble (hasta 14 días); si no, queda reactivado y se juzga solo con lo que haga desde entonces. */
+const patKey=x=>catOf(x.sym)+'|'+(x.side||'long')+'|'+(x.tf||'?');
+const patLab=k=>{const [c,s,t]=k.split('|');return `${c} ${s==='short'?'a la baja':'al alza'} con velas de ${t}`;};
+let patAt=0;
+function patCheck(force){
+  const now=Date.now();if(!force&&now-patAt<600000)return;patAt=now;const PZ=S.pause||(S.pause={});
+  const all=S.agents.flatMap(a=>a.closed.filter(x=>!x.user&&x.t1>now-30*864e5)),g={};all.forEach(x=>{(g[patKey(x)]=g[patKey(x)]||[]).push(x);});
+  const tg=t=>{L(null,'info',t);try{tgPost('🛡️ Automaton · '+t);}catch(e){}};
+  for(const k in g){
+    const st=PZ[k],xs=g[k].filter(x=>x.t1>((st&&st.clear)||0)).sort((a,b)=>b.t1-a.t1);
+    if(st&&st.until>now)continue;
+    if(st&&st.until&&!st.prob){st.prob=now;st.until=0;tg(`Vuelve a prueba: ${patLab(k)}, con la mitad de riesgo.`);continue;}
+    if(st&&st.prob){const af=xs.filter(x=>x.t1>st.prob);if(af.length<5)continue;const m=af.reduce((t,x)=>t+x.pct,0)/af.length;
+      if(m<0){st.dur=Math.min(14*864e5,(st.dur||48*3600e3)*2);st.until=now+st.dur;st.prob=0;st.n=af.length;st.m=m;tg(`Sigue perdiendo en prueba (${af.length} operaciones, media ${pct(m)}): ${patLab(k)} en pausa ${Math.round(st.dur/3600e3)} h.`);}
+      else{PZ[k]={clear:now};tg(`Reactivado: ${patLab(k)} (en prueba, ${af.length} operaciones con media ${pct(m)}).`);}continue;}
+    const r=xs.slice(0,20);if(r.length<8)continue;
+    const v=r.map(x=>x.pct),m=v.reduce((t,x)=>t+x,0)/v.length,sd=Math.sqrt(v.reduce((t,x)=>t+(x-m)**2,0)/(v.length-1)),tt=sd>0?m/(sd/Math.sqrt(v.length)):(m<0?-9:0),pl=r.reduce((t,x)=>t+x.pnl,0);
+    if(m<0&&tt<-1.5&&pl<0){PZ[k]={until:now+48*3600e3,dur:48*3600e3,since:now,n:r.length,m,pnl:pl,clear:(st&&st.clear)||0};
+      tg(`En pausa 48 h: ${patLab(k)}. Pierde de forma clara: ${r.length} operaciones, media ${pct(m)} por operación, ${sgn(pl)} en total.`);}
+  }
+}
+function protGuard(a,an,P){
+  const k=an.sym,sh=an.side==='short',now=Date.now();patCheck();
+  const st=(S.pause||{})[patKey(an)];
+  if(st&&st.until>now)return `tipo de operación en pausa (${patLab(patKey(an))}): pierde de forma clara, se reintenta ${new Date(st.until).toLocaleString('es-ES',{weekday:'short',hour:'2-digit',minute:'2-digit'})}`;
+  const ev=evNow(k,now);if(ev)return 'momento peligroso: '+ev;
+  if(isStk(k)&&sessOf(k)==='us'){const p=etP(now);if(p.m<585)return 'apertura de la bolsa: primeros 15 min, precios erráticos';
+    const g=gapOf(k);if(g!=null&&Math.abs(g)>.04)return `día de noticias: abrió con un salto del ${pct(g,1)} (resultados u otra noticia)`;
+    if(catOf(k)==='Acciones'){const nd=ndxTrend(P);if(nd&&((sh&&nd==='up')||(!sh&&nd==='down')))return `contra la tendencia del Nasdaq (${nd==='up'?'alcista':'bajista'})`;}}
+  const c=kOf(an.tf,k),e=effOf(c);if(e!=null&&e<.2)return `mercado de lado: en las últimas 20 velas de ${an.tf} se mueve sin dirección clara (eficiencia ${Math.round(e*100)} %)`;
+  const nv=nervOf(c);an.nerv=nv!=null&&nv>1.8?nv:0;an.prob=!!(st&&st.prob);
+  return null;
+}
+{const d0=decide;decide=function(a,an,P,T,pre){return d0(a,an,P,T,pre)||protGuard(a,an,P);};}
+/* mercado nervioso o tipo de operación en prueba: misma entrada, pero arriesgando la mitad */
+{const o0=openPos;openPos=function(a,an,P){if(!an.nerv&&!an.prob)return o0(a,an,P);
+  const r=o0(a,an,Object.assign({},P,{riskPct:P.riskPct/2}));if(!r)L(a,'info',`${base(an.sym)}: posición a la mitad de riesgo (${an.nerv?`mercado nervioso, se mueve ${an.nerv.toFixed(1)} veces más de lo normal`:'tipo de operación en prueba tras una pausa'}).`);return r;};}
+RLAB.unshift(['pausa','tipo de operación en pausa'],['momento peligroso','momento peligroso (Fed o IPC)'],['apertura de la bolsa','primeros 15 min de bolsa'],['día de noticias','día de noticias'],['Nasdaq','contra la tendencia del Nasdaq'],['de lado','mercado de lado']);
+function protReport(){
+  const now=Date.now(),PZ=S.pause||{},P=(S.agents[0]||{}).params||DEF_PARAMS,nd=ndxTrend(P);
+  const bt=typeof btcTrend==='function'?btcTrend(P):null,pz=Object.entries(PZ).filter(([,v])=>v.until>now||v.prob);
+  const nx=PROT_EV.filter(([d])=>d>=etP(now).y).sort().slice(0,3).map(([d,e])=>`${d} ${e==='fomc'?'Fed':'IPC'}`).join(', ');
+  return '\nPROTECCIONES\n'+`  tendencia de referencia: bitcoin ${bt==='up'?'alcista':bt==='down'?'bajista':'sin tendencia'} · Nasdaq ${nd==='up'?'alcista':nd==='down'?'bajista':'sin tendencia o sin dato'}`+
+    `\n  pausas: ${pz.length?pz.map(([k,v])=>v.until>now?`${patLab(k)} hasta ${new Date(v.until).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (${v.n} ops, media ${pct(v.m)})`:`${patLab(k)} en prueba`).join(' · '):'ninguna'}`+
+    `\n  próximos momentos peligrosos: ${nx||'ninguno en la lista'}`;
 }

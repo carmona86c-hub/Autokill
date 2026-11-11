@@ -14,9 +14,11 @@ function agentScan(a,manual){
       p.bars++;
       const an=analyze(p.sym,P,p.tf);
       const px0=pxFresh(p.sym,90000)?market.price[p.sym]:null,prog=px0?(isShort(p)?p.entry-px0:px0-p.entry)/p.risk:null;
-      if(Date.now()>=(p.until||p.openedAt+P.maxHold*TF_MS[S.settings.tf]))closePos(a,p,'tiempo máximo');
-      /* sin avance: si tras 16 velas no ha recorrido ni un cuarto del riesgo hacia el objetivo, se cierra para usar el dinero en algo que se mueva */
-      else if(prog!=null&&Date.now()-p.openedAt>=16*TF_MS[S.settings.tf]&&prog<.25&&!p.half)closePos(a,p,'sin avance: libera el capital');
+      /* las esperas se cuentan en velas de la propia operación: una entrada con velas de 1 h no se juzga con relojes de 5 min */
+      const tfm=TF_MS[p.tf||S.settings.tf]||TF_MS[S.settings.tf];
+      if(Date.now()>=(p.until||p.openedAt+P.maxHold*tfm))closePos(a,p,'tiempo máximo');
+      /* sin avance: si tras 16 velas (de su marco) no ha recorrido ni un cuarto del riesgo hacia el objetivo, se cierra para usar el dinero en algo que se mueva */
+      else if(prog!=null&&Date.now()-p.openedAt>=16*tfm&&prog<.25&&!p.half)closePos(a,p,'sin avance: libera el capital');
       /* cruce de medias en contra: en pérdida, corta; en ganancia, no vende pero asegura el stop en la entrada */
       else if(an&&(isShort(p)?an.bullCross:an.bearCross)){if(prog!=null&&prog>0){if(!p.xProt){p.xProt=1;protect(p);}}else closePos(a,p,isShort(p)?'cruce alcista de medias':'cruce bajista de medias');}
     }

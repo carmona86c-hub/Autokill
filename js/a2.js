@@ -136,6 +136,7 @@ function report(){
   `Funcionando desde ${new Date(S.startedAt).toLocaleString('es-ES')} · capital ${money(S.initial)} · patrimonio ${money(t.tot)} · resultado ${sgn(t.pl)} (${pct(t.pl/S.initial)})`,
   `Ajustes: velas ${tfs().join('+')} · comisión ${(st.fee*100).toFixed(3)}% · deslizamiento ${(st.slip*100).toFixed(3)}% · cortos ${st.shorts?'sí':'no'} · mercados ${['BN','BF','HL'].filter(x=>st.markets[x]).map(x=>SRCNAME[x]).join(', ')}`,
   `AGENTES`,...S.agents.map(a=>{const s=stats(a),P=a.params;return `  ${a.name} gen${a.gen} ${a.status}/${a.tier} · ${pct(s.ret)} · ${s.n} ops ${s.n?Math.round(s.hit*100)+'%':''} · PF ${s.n?(isFinite(s.pf)?s.pf.toFixed(2):'∞'):'—'} · caída máx ${(s.dd*100).toFixed(1)}% · EMA ${P.emaF}/${P.emaS} riesgo ${(P.riskPct*100).toFixed(2)}% stop ${(+P.stopATR).toFixed(2)} obj ${(+P.tpATR).toFixed(2)} trail ${(+P.trailATR).toFixed(2)} RSI ${Math.round(P.rsiMin)}-${Math.round(P.rsiMax)} min ${P.minScore}`;}),
+  (()=>{const c=all.filter(x=>x.fees!=null),f=c.reduce((t,x)=>t+x.fees,0),g=c.reduce((t,x)=>t+x.pnl+x.fees,0);return c.length?`COMISIONES: ${money(f)} en ${c.length} operaciones medidas · sin comisiones habrían dado ${sgn(g)}`:'COMISIONES: aún sin operaciones medidas';})(),
   `POR TIPO DE MERCADO`,grp(x=>catOf(x.sym)),`AL ALZA / A LA BAJA`,grp(x=>x.side==='short'?'corto':'largo'),`POR VELAS`,grp(x=>x.tf||'?'),`CON / SIN KRONOS`,grp(x=>x.kr?'con Kronos':'sin Kronos'),`POR MOTIVO DE SALIDA`,grp(x=>x.reason),
   `KRONOS: ${krOn()?(KR.ok?'conectado ('+(KR.model||'')+', '+KR.ms+' ms, '+KR.asked+' previsiones)':'sin respuesta: '+(KR.err||'—')):'desactivado'}`,
   `ÚLTIMA EVALUACIÓN: ${ui.summary||'—'}${ui.reasons?' · descartes: '+ui.reasons:''}`,
@@ -319,7 +320,7 @@ function partialClose(a,p,frac,why){
   const b=p.basis*q/p.qty,f=feeAmt(p.sym,q,price,!sh),net=Math.max(0,sh?q*(2*p.entry-price):q*price)-f,pnl=net-b;
   logOrder(a,p,'parcial',sh?'BUY':'SELL',q,price,f);
   if(!p.basis0)p.basis0=p.basis;if(!p.qty0)p.qty0=p.qty;
-  a.cash+=net;settle(a,p,net);p.qty=+(p.qty-q).toFixed(12);p.basis-=b;p.taken=(p.taken||0)+pnl;
+  a.cash+=net;settle(a,p,net);p.qty=+(p.qty-q).toFixed(12);p.basis-=b;p.taken=(p.taken||0)+pnl;p.fees=(p.fees||0)+f;
   L(a,'close',`${base(p.sym)}: ${why} · vende la mitad @ ${px(price)} · ${sgn(pnl)} asegurados; el resto sigue con el stop en la entrada`);
   return true;
 }
@@ -341,7 +342,7 @@ function openPos(a,an,P){
   const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);
   if(cost+f>cash+1e-9)return `efectivo disponible insuficiente (${money(cash)}${cash<a.cash-.005?', el resto aún se está liquidando':''})`;
   a.cash-=cost+f;
-  const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:rp(an.sym,sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr),risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
+  const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],fees:f,qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:rp(an.sym,sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr),risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
   syncStop(p);logOrder(a,p,'abrir',sh?'SELL':'BUY',qty,entry,f);
   a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym],ruleOf(an.sym)?{rule:ruleOf(an.sym)}:{});
   L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)}) ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
@@ -356,7 +357,7 @@ function closePos(a,p,reason,at,user){
   /* recorrido: cuánto llegó a ir a favor (mfe) y en contra (mae), en múltiplos del riesgo inicial (R) */
   const R=p.risk>0?(sh?p.entry-price:price-p.entry)/p.risk:null;
   a.closed.unshift(Object.assign({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty0||p.qty,pnl,pct:pnl/b0,reason:reason+(p.taken?' · con mitad asegurada':''),t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0,
-    mfe:p.mfe!=null?+p.mfe.toFixed(2):null,mae:p.mae!=null?+p.mae.toFixed(2):null,R:R!=null?+R.toFixed(2):null,half:p.taken?1:0,fund:p.fund?+p.fund.toFixed(4):0,venue:(ruleOf(p.sym)||{}).venue||SRCNAME[srcOf(p.sym)],slMoves:p.sl?p.sl.moves:0},user?{user}:{}));
+    mfe:p.mfe!=null?+p.mfe.toFixed(2):null,mae:p.mae!=null?+p.mae.toFixed(2):null,R:R!=null?+R.toFixed(2):null,half:p.taken?1:0,fund:p.fund?+p.fund.toFixed(4):0,fees:p.fees!=null?+(p.fees+f).toFixed(4):null,venue:(ruleOf(p.sym)||{}).venue||SRCNAME[srcOf(p.sym)],slMoves:p.sl?p.sl.moves:0},user?{user}:{}));
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0&&!user)a.cooldown[p.sym]=Date.now()+30*60e3;
   if(user)labAdd(a,p,user,price,pnl);
@@ -463,7 +464,8 @@ function decide(a,an,P,T,pre){
   if((a.cooldown[an.sym]||0)>Date.now())return 'en espera tras una pérdida reciente';
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
   {const lim=Math.min(4,Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75)));if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
-  if(a.positions.some(p=>p.sym===an.sym||(catOf(p.sym)==='Cripto'&&catOf(an.sym)==='Cripto'&&base(p.sym)===base(an.sym))))return 'ya en cartera';
+  /* el mismo activo por otra vía (p. ej. NVDA en Binance Futuros y en Hyperliquid) es la misma exposición: no se duplica */
+  if(a.positions.some(p=>p.sym===an.sym||base(p.sym).toUpperCase()===base(an.sym).toUpperCase()))return 'ya en cartera';
   if(!pre&&krOn()){
     const f=krOf(an.sym,an.tf);
     if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}

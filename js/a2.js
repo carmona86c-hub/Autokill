@@ -85,7 +85,11 @@ const krKey=(k,tf)=>k+'|'+tf;
 const lastT=(k,tf)=>{const c=kOf(tf,k);return c&&c.length?c[c.length-1].t:0;};
 function krEntry(k,tf){const c=KR.cache[krKey(k,tf)];return c&&c.t===lastT(k,tf)?c:null;}
 const krOf=(k,tf)=>{const c=krEntry(k,tf);return c?c.r:null;};
-const costOf=k=>2*feeOf(k)+2*S.settings.slip;
+/* deslizamiento: el de ajustes y, en acciones que van a IBKR con precio de Binance Futuros, un 0,03 % más por orden.
+   Medido contra la bolsa de EE. UU. (velas de 1 minuto, 19-23 oct): con ese precio la simulación salía de media 0,06 puntos
+   más optimista por operación completa; así no lo es. Con precio de Hyperliquid no hace falta: coincide con la bolsa. */
+const slipOf=k=>S.settings.slip+(onIB(k)&&srcOf(k)==='BF'&&catOf(k)!=='Cripto'?.0003:0);
+const costOf=k=>2*feeOf(k)+2*slipOf(k);
 async function krFetch(list){
   if(KR.busy||!list.length)return;
   if(KR.loading&&Date.now()-KR.at<30000)return; /* el modelo se está cargando tras un reinicio: se reintenta cada 30 s */
@@ -328,11 +332,11 @@ function sweep(a){
 }
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
 function netIfClose(p,mkt){return inV(p.ven||null,()=>netIfClose0(p,mkt));}
-function netIfClose0(p,mkt){const sh=isShort(p),price=mkt*(sh?1+S.settings.slip:1-S.settings.slip),f=feeAmt(p.sym,p.qty,price,!sh);return Math.max(0,posVal(p,price))-f-p.basis+(p.taken||0)+(p.fund||0);}
+function netIfClose0(p,mkt){const sh=isShort(p),sl=slipOf(p.sym),price=mkt*(sh?1+sl:1-sl),f=feeAmt(p.sym,p.qty,price,!sh);return Math.max(0,posVal(p,price))-f-p.basis+(p.taken||0)+(p.fund||0);}
 /* toma parcial: vende una parte de la posición y guarda lo ganado; la operación sigue siendo una sola en el historial */
 function partialClose(a,p,frac,why){return inV(p.ven||null,()=>partialClose0(a,p,frac,why));}
 function partialClose0(a,p,frac,why){
-  const sh=isShort(p),price=(market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),q=wholeOnly(p.sym,sh)?Math.floor(p.qty*frac):rq(p.sym,p.qty*frac);
+  const sh=isShort(p),sl=slipOf(p.sym),price=(market.price[p.sym]||p.entry)*(sh?1+sl:1-sl),q=wholeOnly(p.sym,sh)?Math.floor(p.qty*frac):rq(p.sym,p.qty*frac);
   /* el exchange tiene que aceptar las dos partes: la que se vende y la que queda */
   if(vet(p.sym,q,price)||vet(p.sym,+(p.qty-q).toFixed(12),price))return false;
   const b=p.basis*q/p.qty,f=feeAmt(p.sym,q,price,!sh),net=Math.max(0,sh?q*(2*p.entry-price):q*price)-f,pnl=net-b;
@@ -344,7 +348,7 @@ function partialClose0(a,p,frac,why){
 }
 /* calcula la orden en un bróker con el efectivo que haya en él (sin tocar nada): cantidad, comisión y si el dinero se quedó corto */
 function sizeOn(a,an,P,cash){
-  const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=S.settings.slip;
+  const T=TIER[a.tier],e=eq(a),fee=feeOf(an.sym),slip=slipOf(an.sym);
   const sh=an.side==='short',entry=an.price*(sh?1-slip:1+slip),stopDist=P.stopATR*an.atr;
   if(sh&&!canShort(an.sym))return {err:onIB(an.sym)?'cortos no permitidos en IBKR para este activo o esta cuenta':'en contado no se puede vender en corto'};
   const mn=minNot(an.sym);let qty=(e*P.riskPct*T.risk)/stopDist;
@@ -431,7 +435,7 @@ function routeReport(){
    van a tu registro aparte, donde se sigue el precio para saber qué habría hecho el plan del agente */
 function closePos(a,p,reason,at,user){return inV(p.ven||null,()=>closePos0(a,p,reason,at,user));}
 function closePos0(a,p,reason,at,user){
-  const sh=isShort(p),price=(at||market.price[p.sym]||p.entry)*(sh?1+S.settings.slip:1-S.settings.slip),f=feeAmt(p.sym,p.qty,price,!sh),net=Math.max(0,posVal(p,price))-f,b0=p.basis0||p.basis,pnl=net-p.basis+(p.taken||0)+(p.fund||0);
+  const sh=isShort(p),sl=slipOf(p.sym),price=(at||market.price[p.sym]||p.entry)*(sh?1+sl:1-sl),f=feeAmt(p.sym,p.qty,price,!sh),net=Math.max(0,posVal(p,price))-f,b0=p.basis0||p.basis,pnl=net-p.basis+(p.taken||0)+(p.fund||0);
   a.cash+=net;settle(a,p,net);if(isMix()&&p.ven)vrOf(a)[p.ven]+=net-p.basis;a.positions=a.positions.filter(x=>x!==p);logOrder(a,p,'cerrar',sh?'BUY':'SELL',p.qty,price,f);
   if(!user){const ex=S.exp[p.sym]||(S.exp[p.sym]={n:0,w:0,pnl:0,sumPct:0});ex.n++;if(pnl>0)ex.w++;ex.pnl+=pnl;ex.sumPct+=pnl/b0;}
   /* recorrido: cuánto llegó a ir a favor (mfe) y en contra (mae), en múltiplos del riesgo inicial (R) */

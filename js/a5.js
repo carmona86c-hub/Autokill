@@ -33,13 +33,15 @@ function applyCmd(c,a){
       L(null,'info',S.running?'Agente reanudado.':'Agente en pausa: no abre operaciones nuevas, pero sigue vigilando los stops de las abiertas.');return ok(S.running?'Reanudado.':'En pausa.');
     case 'scan':return ok('Reevaluando.');
     case 'capital':{const v=+a.v;if(!(v>=20))return no('Mínimo $20');
+      /* en un bróker real las posiciones abiertas seguirían ahí: no se puede empezar de cero con ellas dentro */
+      {const n=S.agents.reduce((t,x)=>t+x.positions.length,0);if(n)return no(`Hay ${n} posici${n>1?'ones abiertas':'ón abierta'}: véndela${n>1?'s':''} o espera a que se cierre${n>1?'n':''} antes de reiniciar.`);}
       /* reiniciar el saldo no borra lo aprendido: se conservan la experiencia por activo, los ajustes,
          los parámetros que ha ido afinando el agente original, el cementerio y un resumen de cada etapa anterior */
       const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x)+(x.vault||0),0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
       S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
-      S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;
-      ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
+      S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.sig=prev.sig;S.pause=prev.pause;
+      ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados, el laboratorio de señales y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
     case 'settings':applySettings(a);L(null,'info','Ajustes guardados.');return ok('Ajustes guardados.');
@@ -220,7 +222,7 @@ $('capBtn').addEventListener('click',async()=>{
   if(!(v>=20)){b.textContent='Mínimo $20';setTimeout(()=>{b.textContent='Fijar y reiniciar';},1800);return;}
   if(!armT){b.textContent='Toca otra vez para confirmar';b.classList.add('warn');armT=setTimeout(()=>{armT=null;b.textContent='Fijar y reiniciar';b.classList.remove('warn');},4000);return;}
   clearTimeout(armT);armT=null;b.classList.remove('warn');b.textContent='Fijar y reiniciar';
-  const r=await act('capital',{v});if(!r.ok){b.textContent=r.msg;setTimeout(()=>{b.textContent='Fijar y reiniciar';},2500);}$('stAgent').innerHTML='';
+  const r=await act('capital',{v});if(!r.ok){b.textContent=r.msg;setTimeout(()=>{b.textContent='Fijar y reiniciar';},5000);}$('stAgent').innerHTML='';
 });
 $('runBtn').addEventListener('click',()=>act('run',{on:!S.running}));
 $('scanBtn').addEventListener('click',()=>act('scan'));

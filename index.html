@@ -16,7 +16,7 @@
 /* Layout: patrimonio fijo arriba, pestañas abajo, el contenido se desplaza en medio. */
 :root{
   --bg:#eef2f5; --panel:#ffffff; --line:#d5dee5; --fg:#0f1a22; --mute:#5a6c7a;
-  --money:#a86a00; --up:#0e8f5b; --down:#cc3b3b; --info:#2c6fd1; --chip:#e4ebf0;
+  --money:#8a5800; --up:#08744a; --down:#b8322f; --info:#255fbf; --chip:#e4ebf0;
   --ui:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
@@ -173,6 +173,11 @@ summary{list-style-position:inside}
     <b id="netTitle">No se pueden cargar los mercados</b>
     <p id="netMsg"></p>
     <div class="row"><button id="netRetry" class="btn pri" type="button">Reintentar</button><button id="netCopy" class="btn" type="button" hidden>Copiar instrucciones</button></div>
+  </div>
+  <div id="srvBan" class="ban" hidden role="alert">
+    <b id="srvTitle">El agente 24/7 no está funcionando</b>
+    <p id="srvMsg"></p>
+    <div class="row"><button id="srvWake" class="btn pri" type="button">Despertar el servidor</button><a class="btn" href="https://dashboard.render.com" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Abrir Render</a></div>
   </div>
   <section id="s-panel" class="on">
     <div class="card cap">

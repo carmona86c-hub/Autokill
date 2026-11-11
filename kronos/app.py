@@ -4,8 +4,11 @@ Recibe velas reales (las manda la app) y devuelve lo que Kronos prevé para las
 próximas velas: rentabilidad media esperada, % de escenarios que acaban al alza y
 rango. Varios escenarios independientes por activo para medir el acuerdo.
 """
+import contextlib
 import math
 import os
+import signal
+import subprocess
 import threading
 import time
 
@@ -62,7 +65,55 @@ def load():
         state["error"] = repr(e)
 
 
-threading.Thread(target=load, daemon=True).start()
+# Kronos solo se carga en memoria cuando la app lo pide de verdad (el servidor gratuito tiene 512 MB para todo).
+# Con KRONOS_PRELOAD=1 se carga al arrancar, como antes.
+_loading = threading.Lock()
+
+
+def ensure_loaded():
+    if state["ready"] or state["error"] or not _loading.acquire(blocking=False):
+        return
+    state["loading"] = True
+    threading.Thread(target=lambda: (load(), state.update(loading=False)), daemon=True).start()
+
+
+state["loading"] = False
+if os.environ.get("KRONOS_PRELOAD") == "1":
+    ensure_loaded()
+
+# ---------- vigilante del agente 24/7 (Node) ----------
+AGENT_JS = os.environ.get("AGENT_JS", "/app/agent/server.js")
+AG = {"proc": None, "stopping": False, "restarts": 0, "started": None}
+
+
+def supervise():
+    while not AG["stopping"]:
+        AG["started"] = time.time()
+        try:
+            AG["proc"] = subprocess.Popen(["node", AGENT_JS])
+            code = AG["proc"].wait()
+        except Exception as e:  # el vigilante nunca se para
+            code = repr(e)
+        if AG["stopping"]:
+            break
+        AG["restarts"] += 1
+        print(f"El agente se ha parado (código {code}); se vuelve a arrancar en 5 s (reinicio {AG['restarts']}).", flush=True)
+        time.sleep(5)
+
+
+def stop_agent():
+    AG["stopping"] = True
+    p = AG["proc"]
+    if p and p.poll() is None:
+        p.send_signal(signal.SIGTERM)  # el agente guarda su estado y sale
+        try:
+            p.wait(timeout=22)
+        except Exception:
+            p.kill()
+
+
+if os.path.exists(AGENT_JS) and os.environ.get("AGENT_SUPERVISE", "1") != "0":
+    threading.Thread(target=supervise, daemon=True).start()
 
 
 def _clean(series):
@@ -117,11 +168,14 @@ def _forecast(items, pred_len, samples):
 
 
 async def home(request: Request):
-    return JSONResponse({"service": "automaton-kronos", **state})
+    p = AG["proc"]
+    return JSONResponse({"service": "automaton-kronos", **state,
+                         "agent": {"running": bool(p and p.poll() is None), "restarts": AG["restarts"]}})
 
 
 async def forecast(request: Request):
     if not state["ready"]:
+        ensure_loaded()
         return JSONResponse({"error": "modelo cargando" if not state["error"] else state["error"], **state}, status_code=503)
     try:
         body = await request.json()
@@ -160,7 +214,10 @@ async def agent(request: Request):
     body = await request.body() if request.method == "POST" else None
 
     def call():
-        req = urllib.request.Request(url, data=body, method=request.method, headers={"Content-Type": "application/json"})
+        h = {"Content-Type": "application/json"}
+        if request.headers.get("x-agent-key"):
+            h["X-Agent-Key"] = request.headers["x-agent-key"]
+        req = urllib.request.Request(url, data=body, method=request.method, headers=h)
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return r.status, r.read()
@@ -173,9 +230,16 @@ async def agent(request: Request):
     return Response(data, status_code=code, media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    yield
+    await run_in_threadpool(stop_agent)  # al apagar: el agente guarda y sale
+
+
 app = Starlette(
     routes=[Route("/", home), Route("/forecast", forecast, methods=["POST"]),
             Route("/agent/{rest:path}", agent, methods=["GET", "POST"])],
     middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"]),
                 Middleware(GZipMiddleware, minimum_size=1000)],
+    lifespan=lifespan,
 )

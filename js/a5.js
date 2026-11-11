@@ -136,7 +136,7 @@ function exportView(){
 }
 let remErr=null,remAt=0;
 async function pullRemote(){
-  try{const j=await fget(cleanUrl(REM.url)+'/agent/state'+(REM.key?'?key='+encodeURIComponent(REM.key):''));
+  try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined); /* la clave va en la cabecera, no en la dirección */
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
     S=j.S;const now=Date.now();
     market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;

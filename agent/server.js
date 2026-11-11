@@ -108,7 +108,21 @@ async function saveRemote(force) {
 
 /* ---------- arranque ---------- */
 async function main() {
-  const prev = await loadRemote();
+  let prev = await loadRemote();
+  /* en una actualización, el servidor viejo sigue un momento y guarda al apagarse: si el estado guardado es reciente,
+     se espera (hasta 90 s) a ese último guardado para no pisar lo que hizo en ese rato */
+  try {
+    const ls = prev && JSON.parse(prev).lastSeen;
+    if (TOKEN && ls && Date.now() - ls < 11 * 60e3) {
+      log('Estado reciente: espero el último guardado del servidor anterior (hasta 90 s)…');
+      const sha0 = fileSha;
+      for (let i = 0; i < 9; i++) {
+        await new Promise(r => setTimeout(r, 10e3));
+        const m = await gh('/contents/' + FILE + '?ref=' + BRANCH).catch(() => null);
+        if (m && m.ok && (await m.json()).sha !== sha0) { prev = await loadRemote(); log('Recibido el último guardado del servidor anterior.'); break; }
+      }
+    }
+  } catch (e) { log('Espera de relevo:', e.message); }
   if (prev) { storage.set(LS_KEY, prev); log('Estado recuperado de GitHub (' + prev.length + ' bytes).'); }
   else log(TOKEN ? 'Sin estado previo en GitHub: arranca un agente nuevo.' : 'Sin GITHUB_TOKEN: el estado vive solo en memoria.');
   for (const f of ['a1.js', 'a2.js', 'a3.js', 'a4.js', 'a5.js']) run(fs.readFileSync(path.join(WEB, f), 'utf8'));
@@ -122,6 +136,9 @@ async function main() {
     } catch (e) { log(e); }
   }, 3000);
   setInterval(() => { run('save(true)'); saveRemote(false); }, SAVE_MS);
+  /* además, se guarda en cuanto se abre o se cierra una operación (si el servidor se cae, no se pierde) */
+  let opSig = '';
+  setInterval(() => { try { const s = run(`S?S.agents.map(a=>a.positions.length+':'+a.closed.length+':'+(a.vault||0).toFixed(2)).join('|'):''`); if (s && s !== opSig) { const first = !opSig; opSig = s; if (!first) { run('save(true)'); saveRemote(false); } } } catch (e) { } }, 20e3);
   /* Render apaga el plan gratuito tras 15 min sin visitas: el propio agente se visita por su dirección pública cada 9 min */
   const SELF = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
   if (SELF) { const ping = () => fetch(SELF.replace(/\/+$/, '') + '/agent/health').catch(e => log('Autovisita fallida:', e.message)); setTimeout(ping, 60e3); setInterval(ping, 9 * 60e3); }
@@ -149,13 +166,13 @@ async function handle(req, res) {
     if (u.pathname === '/agent/health') return send(res, 200, { ok: true, ready: ready(), saved: saveInfo, github: !!TOKEN, keyRequired: !!KEY });
     if (!ready()) return send(res, 503, { error: 'el agente está arrancando' });
     if (req.method === 'GET' && u.pathname === '/agent/state') {
-      if (KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
+      if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
       const v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN };
       return send(res, 200, v);
     }
     if (req.method === 'POST' && u.pathname === '/agent/cmd') {
       const b = JSON.parse(await readBody(req) || '{}');
-      if (KEY && b.key !== KEY) return send(res, 401, { ok: false, msg: 'clave incorrecta' });
+      if (KEY && b.key !== KEY && req.headers['x-agent-key'] !== KEY) return send(res, 401, { ok: false, msg: 'clave incorrecta' });
       ctx.__cmd = { c: String(b.cmd || ''), a: b.args || {} };
       const r = run('(()=>{const c=__cmd.c,a=__cmd.a,r=applyCmd(c,a);if(r.ok){save(true);if(["scan","capital","settings","import","run"].includes(c)&&S.running)setTimeout(()=>tick(c!=="run"),50);}return r;})()');
       if (r.ok && ['import', 'capital', 'settings', 'spawn', 'fund', 'prune', 'unvault'].includes(b.cmd)) saveRemote(false);

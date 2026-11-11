@@ -69,6 +69,7 @@ function updateHero(){
   const el=$('hPnl');el.className='pnl '+(pl>=0?'up':'down');
   el.textContent=`${pl>=0?'▲':'▼'} ${sgn(pl)} (${pct(pl/S.initial)}) sobre ${money(S.initial)}`;
   $('tVault').textContent=money(vault);
+  {const ob=tot-vault,d=ob-S.initial,e=$('hBot'),f=$('hBotD');if(e){e.textContent=money(ob);f.className='pnl '+(d>=0?'up':'down');f.textContent=`${d>=0?'▲':'▼'} ${sgn(d)} sobre sus ${money(S.initial)}`;}}
   $('tOp').textContent=money(op);$('tRes').textContent=String(npos);
   $('tLossL').textContent=pl>=0?'Ganado':'Perdido';
   const le=$('tLoss');le.textContent=money(Math.abs(pl));le.className=pl>=0?'up':'down';

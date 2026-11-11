@@ -208,6 +208,7 @@ summary{list-style-position:inside}
     <div id="kpis" class="kpis"></div>
     <div class="card"><h2>Evolución del patrimonio</h2><canvas id="chart" aria-label="Gráfico de patrimonio"></canvas></div>
     <div class="card"><h2>Últimas operaciones</h2><div class="tw" id="trades"></div></div>
+    <div class="card" id="routeCard" hidden><h2>Reparto entre brókers</h2><div id="routeInfo"></div><p id="routeMsg" class="note up" style="margin:8px 0 0"></p></div>
     <div class="card"><h2>Órdenes al exchange</h2><p class="note" style="margin:0 0 8px">Cada compra y venta se construye como la orden real que recibiría el exchange (Binance o Hyperliquid), con sus redondeos y mínimos. Ahora se ejecutan en simulación: no se envía nada ni se usa dinero real.</p><div id="ordInfo" class="note" style="margin:0 0 8px"></div><div class="tw" id="ordT"></div></div>
     <div class="card"><h2>Informe para revisar</h2><p class="note" style="margin:0 0 8px">Resume resultados por agente, por tipo de mercado, al alza y a la baja, motivos de descarte y últimas operaciones. Cópialo y pégamelo en el chat para ajustar el agente con datos reales.</p>
       <button id="repBtn" class="btn pri" type="button">Copiar informe</button><p id="repMsg" class="note" style="margin:8px 0 0"></p>
@@ -260,10 +261,11 @@ summary{list-style-position:inside}
     <div class="card">
       <h2>Broker</h2>
       <div class="grid2">
-        <div class="field"><label class="lbl" for="sBroker">Simular como</label><select id="sBroker"><option value="ibkr">IBKR</option><option value="ex">Exchanges cripto</option></select></div>
+        <div class="field"><label class="lbl" for="sBroker">Simular como</label><select id="sBroker"><option value="ibkr">IBKR</option><option value="mix">IBKR + Binance (elige el más barato)</option><option value="ex">Exchanges cripto</option></select></div>
         <div class="field"><label class="lbl" for="sPlan">Tarifa IBKR</label><select id="sPlan"><option value="tiered">Escalonada</option><option value="fixed">Fija</option></select></div>
       </div>
       <p class="note" style="margin:8px 0 0">Con IBKR la simulación sigue sus reglas: acciones y ETF de EE. UU. (los índices y materias primas se operan con su ETF) en horario de bolsa, por acción y con mínimo por orden (escalonada: $0,0035 por acción, mínimo $0,35; fija: $0,005, mínimo $1; nunca más del 1 %); cripto solo BTC, ETH, SOL, XRP, ADA y DOGE, solo compra, 0,18 % con mínimo de $1,75; divisas con mínimo de $2. Cortos solo con cuenta de margen (desde $2.000) y por acciones enteras, pagando préstamo. En cuenta de efectivo, lo que se cobra al vender acciones se puede volver a usar al día hábil siguiente. Con poco capital los mínimos por orden pesan mucho: el agente descarta lo que no cubre los costes.</p>
+      <p class="note" style="margin:8px 0 0">Con «IBKR + Binance», las acciones, ETF y divisas van a IBKR y cada orden de cripto va al que le salga más barato con ese tamaño: Binance contado (0,1 %, sin mínimo, cualquier cripto con par en dólares) o IBKR. El saldo se reparte entre los dos como lo estaría en real, y en Estadísticas verás cuánto hay en cada uno, el ahorro y el reparto que recomienda la app.</p>
     </div>
     <div class="card">
       <h2>Mercado y costes</h2>

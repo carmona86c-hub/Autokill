@@ -1,9 +1,9 @@
 # Mantiene despierto el servidor gratuito de Render (se duerme tras 15 min sin visitas),
-# para que el agente opere 24/7. Solo hace una visita ligera cada 10 minutos.
+# para que el agente opere 24/7. Solo hace una visita ligera cada 30 minutos (con el repositorio privado, así no se pasa de los 2.000 minutos gratis al mes de GitHub; el propio servidor además se visita cada 9 min).
 name: Mantener despierto el servidor
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 permissions: {}
 jobs:

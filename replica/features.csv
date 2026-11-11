@@ -1,0 +1,54 @@
+feature,area,priority,original,clone,notes
+Fijar capital inicial ficticio y reiniciar conservando lo aprendido,capital,must,yes,no,S01; reinicia saldo/posiciones/registro pero mantiene exp y reglas
+Precios reales de Binance contado (REST + WebSocket miniTicker),mercados,must,yes,no,solo lectura; varios hosts de respaldo
+Precios reales de Binance Futuros (cripto y TradFi: oro plata),mercados,must,yes,no,incluye financiación de perpetuos
+Precios reales de Hyperliquid (acciones índices materias primas divisas),mercados,must,yes,no,API pública /info y ws
+Universo dinámico: criptos de más volumen (5-60),mercados,must,yes,no,recarga cada 30 min
+Horarios de mercado reales con festivos (NYSE CME) y cierre 5 min antes,mercados,must,yes,no,sessOf/sessOpen/nextOpen; parte difícil
+Bucle del agente: escaneo por vela (1m/5m/15m) y vigilancia continua de stops,agente,must,yes,no,tick/schedule
+Análisis técnico: EMA rápida/lenta RSI ATR tendencia de BTC y marco superior,agente,must,yes,no,analyze
+Puntuación de candidatos con umbral mínimo y radar de motivos de descarte,agente,must,yes,no,S01 Radar; RLAB
+Apertura de posiciones largas con riesgo por operación y tamaño máximo,operativa,must,yes,no,openPos
+Cortos 100% cubiertos (sin apalancamiento) activables,operativa,should,yes,no,constitución I
+Stop por ATR objetivo trailing break-even cierre parcial y tiempo máximo,operativa,must,yes,no,manage/protect/partialClose
+Comisiones y deslizamiento simulados por venue,costes,must,yes,no,feeOf/feeAmt
+Reglas de exchange: lotes tick mínimos de nocional,costes,must,yes,no,bnRules; MIN_NOTIONAL
+Modo IBKR: tarifa escalonada/fija mínimos por orden cripto limitada liquidación T+1,broker,should,yes,no,parte compleja; posCap eficiente
+Cuenta de margen IBKR para cortos (desde $2.000) solo acciones enteras,broker,could,yes,no,
+Construcción de órdenes reales simuladas (ticket) con historial de órdenes,ordenes,should,yes,no,S03 Órdenes al exchange
+Pérdida diaria máxima que bloquea nuevas entradas,riesgo,must,yes,no,dayLoss
+Niveles de supervivencia (normal / low_compute / critical / dead) por patrimonio,riesgo,must,yes,no,TIER; constitución II
+Apagado del agente si se agota el capital,riesgo,must,yes,no,kill
+Cartera reservada (congelada) con límite de ganancia,capital,should,yes,no,sweep; S00 cabecera
+Registro de decisiones incluidas las rechazadas con motivo,registro,must,yes,no,S02; constitución III
+Cabecera: patrimonio total PnL efectivo libre posiciones resultado,panel,must,yes,no,S00
+Desplegable de posiciones con mini-gráfico por activo,panel,should,yes,no,drawPos
+Selector de modo (automático / límite de ganancia),panel,should,yes,no,renderMode
+Pausar/reanudar agente y Reevaluar ahora,panel,must,yes,no,S01
+Mercados vigilados y diagnóstico de conexión,panel,should,yes,no,diagnose
+Banner de error de red con reintento,panel,should,yes,no,renderBan
+Estadísticas por agente: KPIs y gráfico de patrimonio,estadisticas,must,yes,no,S03 canvas propio
+Tabla de últimas operaciones,estadisticas,must,yes,no,
+Informe de texto copiable para revisión,estadisticas,should,yes,no,report/reportFull
+Experiencia por activo que ajusta puntuación y veta activos,aprendizaje,must,yes,no,xp(); se conserva al reiniciar
+Auto-mejora: backtest de variantes de parámetros y rollback,aprendizaje,should,yes,no,selfImprove/checkRollback; parte difícil
+Estudio de capital (qué capital rinde mejor),aprendizaje,could,yes,no,capStudy
+Replicación: hijos con cartera propia génesis y constitución con huella,linaje,should,yes,no,S04; spawnChild
+Ciclo de vida de hijos (creando→…→vivo / enfermo / recuperándose / muerto),linaje,should,yes,no,LIFE
+Financiar hijos mensajes del padre informes verificar constitución,linaje,should,yes,no,
+Mutación de parámetros y adopción si el hijo supera al padre,linaje,could,yes,no,mutate/maybeEvolve
+Cementerio de hijos retirados,linaje,could,yes,no,pruneDead
+Kronos: servicio de previsión IA propio (confirmar entradas / anticipar salidas),ia,should,yes,no,kronos/app.py modelo abierto Kronos-mini
+Servidor 24/7 en Render ejecutando el mismo código sin navegador,servidor,should,yes,no,agent/server.js con DOM falso vía vm
+Estado del servidor persistido en rama git "estado",servidor,should,yes,no,GITHUB_TOKEN
+Ver y mandar órdenes al agente remoto desde el móvil con clave,servidor,should,yes,no,/agent/state /agent/cmd
+Avisos por Telegram (operaciones resumen diario 22:00 copia diaria),avisos,should,yes,no,
+Avisos del navegador,avisos,could,yes,no,
+Copia de seguridad: copiar mostrar pegar archivo enviar a Telegram,datos,must,yes,no,S05
+Persistencia local (localStorage + IndexedDB) y migraciones de versión,datos,must,yes,no,migrate()
+PWA instalable con service worker y tema claro/oscuro,app,should,yes,no,manifest.json sw.js
+Parámetros editables del agente original con límites,ajustes,should,yes,no,DEF_PARAMS/BOUNDS
+Conector de órdenes reales Binance (firmado HMAC),ordenes,could,yes,no,PREPARADO Y DESACTIVADO; no activar sin decisión expresa
+Envío real a Hyperliquid (firma EIP-712),ordenes,could,no,skip,no existe en el original; requiere clave de cartera
+Datos de mercado propios,mercados,could,no,skip,son de Binance/Hyperliquid; se consumen vía API pública
+Modelo Kronos (pesos),ia,could,no,skip,modelo de terceros de código abierto: se usa no se reentrena

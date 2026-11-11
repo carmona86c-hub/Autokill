@@ -138,6 +138,29 @@ th{color:var(--mute);font-weight:500;border-top:0}th:first-child,td:first-child{
 .dg{display:grid;grid-template-columns:18px 1fr;gap:2px 8px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
 .dg:first-child{margin-top:10px}.dg i{font-style:normal;font-weight:700}.dg .note{grid-column:2;font-family:var(--mono);font-size:11.5px;word-break:break-word}
 summary{list-style-position:inside}
+/* Ajustes plegables: cada tarjeta muestra su título y una línea; se abre al tocarla */
+.grp{font:700 11px var(--ui);letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:8px 2px -4px}
+.grp:first-child{margin-top:0}
+details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary>span{display:grid;gap:2px;min-width:0}
+details.fold>summary h2{margin:0;color:var(--fg)}
+details.fold>summary .sub{font:400 12.5px var(--ui);color:var(--mute);letter-spacing:0;text-transform:none}
+details.fold>summary::after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--mute);border-bottom:2px solid var(--mute);transform:rotate(45deg);margin:0 4px 4px 0;transition:transform .15s}
+details.fold[open]>summary::after{transform:rotate(-135deg);margin:4px 4px 0 0}
+details.fold[open]>summary{margin-bottom:12px}
+details.help{margin:8px 0 0}
+details.help>summary{list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--info);display:inline-flex;align-items:center;gap:6px}
+details.help>summary::-webkit-details-marker{display:none}
+details.help>summary::before{content:"?";display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;border:1.5px solid currentColor;font-size:10.5px;font-weight:700}
+details.help>p{margin:6px 0 0}
+details.help:first-child{margin:0 0 8px}
+/* el botón de guardar queda siempre a mano, encima de las pestañas */
+.savebar{position:sticky;bottom:calc(52px + env(safe-area-inset-bottom,0px));z-index:5;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;box-shadow:0 -6px 18px rgba(0,0,0,.08)}
+.savebar .note{margin:0}
+.savebar.dirty{border-color:var(--money)}
+.savebar.dirty .note{color:var(--money);font-weight:600}
 .ban{border:1px solid var(--down);background:var(--panel);border-radius:10px;padding:12px;margin-bottom:14px;display:grid;gap:8px}
 .ban[hidden]{display:none}.ban b{color:var(--down)}.ban p{margin:0}
 @media (min-width:700px){main,header>*,nav{max-width:760px;width:100%;margin-left:auto;margin-right:auto}}
@@ -181,7 +204,7 @@ summary{list-style-position:inside}
         <input id="capIn" type="number" inputmode="decimal" min="20" step="10" aria-label="Capital inicial en dólares">
         <button id="capBtn" class="btn pri" type="button">Fijar y reiniciar</button>
       </div>
-      <p class="note" style="margin:8px 0 0">Depósito ficticio con precios reales. Fijarlo reinicia el saldo, las posiciones y el registro, pero conserva lo aprendido (experiencia, reglas afinadas y resumen de cada etapa). En automático lo que gana se queda operando; con tu límite de ganancia puesto, lo que pase de su capital va a la cartera reservada (congelada).</p>
+      <details class="help"><summary>¿Qué pasa al fijarlo?</summary><p class="note">Depósito ficticio con precios reales. Fijarlo reinicia el saldo, las posiciones y el registro, pero conserva lo aprendido (experiencia, reglas afinadas y resumen de cada etapa). En automático lo que gana se queda operando; con tu límite de ganancia puesto, lo que pase de su capital va a la cartera reservada (congelada).</p></details>
     </div>
     <div class="row">
       <button id="runBtn" class="btn" type="button" style="flex:1">Pausar agente</button>
@@ -241,38 +264,17 @@ summary{list-style-position:inside}
   </section>
 
   <section id="s-set">
-    <div class="card">
-      <h2>Servidor 24/7</h2>
-      <p class="note" style="margin:0 0 8px">El agente puede vivir en tu servidor de Render y operar día y noche aunque cierres la app o apagues el móvil. Este dispositivo pasa a ser la pantalla para verlo y darle órdenes; los cambios que hagas aquí se aplican en el servidor.</p>
-      <div class="field" style="gap:10px">
-        <div class="field"><label class="lbl" for="rUrl">Dirección del servidor</label><input id="rUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://autokill.onrender.com"></div>
-        <div class="field"><label class="lbl" for="rKey">Clave (solo si la pusiste en Render como AGENT_KEY)</label><div class="pw"><input id="rKey" type="password" autocomplete="off" placeholder="opcional"><button id="rEye" class="eye" type="button" aria-label="Mostrar clave" aria-pressed="false" onclick="var i=document.getElementById('rKey'),v=i.type==='password';i.type=v?'text':'password';this.setAttribute('aria-pressed',v);this.setAttribute('aria-label',v?'Ocultar clave':'Mostrar clave');this.textContent=v?'🙈':'👁'">👁</button></div></div>
-        <button id="rPush" class="btn pri" type="button">Pasar mi agente al servidor</button>
-        <div class="row"><button id="rView" class="btn" type="button" style="flex:1">Ver el del servidor</button><button id="rOff" class="btn" type="button" style="flex:1">Usar el de este dispositivo</button></div>
-        <p id="rMsg" class="note" style="margin:0"></p>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Broker</h2>
+    <h3 class="grp">Lo habitual</h3>
+    <details class="card fold">
+      <summary><span><h2>Broker</h2><span class="sub">Con quién se simula y su tarifa</span></span></summary>
       <div class="grid2">
         <div class="field"><label class="lbl" for="sBroker">Simular como</label><select id="sBroker"><option value="ibkr">IBKR</option><option value="ex">Exchanges cripto</option></select></div>
         <div class="field"><label class="lbl" for="sPlan">Tarifa IBKR</label><select id="sPlan"><option value="tiered">Escalonada</option><option value="fixed">Fija</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Con IBKR la simulación sigue sus reglas: acciones y ETF de EE. UU. (los índices y materias primas se operan con su ETF) en horario de bolsa, por acción y con mínimo por orden (escalonada: $0,0035 por acción, mínimo $0,35; fija: $0,005, mínimo $1; nunca más del 1 %); cripto solo BTC, ETH, SOL, XRP, ADA y DOGE, solo compra, 0,18 % con mínimo de $1,75; divisas con mínimo de $2. Cortos solo con cuenta de margen (desde $2.000) y por acciones enteras, pagando préstamo. En cuenta de efectivo, lo que se cobra al vender acciones se puede volver a usar al día hábil siguiente. Con poco capital los mínimos por orden pesan mucho: el agente descarta lo que no cubre los costes.</p>
-    </div>
-    <div class="card">
-      <h2>Mercado y costes</h2>
-      <div class="grid2">
-        <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%) · modo exchanges</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
-        <div class="field"><label class="lbl" for="sSlip">Deslizamiento (%)</label><input id="sSlip" type="number" step="0.01" inputmode="decimal"></div>
-        <div class="field"><label class="lbl" for="sDay">Pérdida diaria máxima (%)</label><input id="sDay" type="number" step="0.5" min="0.5" max="20" inputmode="decimal"></div>
-        <div class="field"><label class="lbl" for="sUni">Criptomonedas vigiladas</label><input id="sUni" type="number" min="5" max="60" inputmode="numeric"></div>
-        <div class="field"><label class="lbl" for="sTf">Velas de decisión</label><select id="sTf"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option></select></div>
-      </div>
-      <p class="note" style="margin:8px 0 0">Precios reales en solo lectura. Las criptomonedas son las de más volumen en Binance. Binance Futuros cobra la mitad de comisión y Hyperliquid un 90 %. Si un agente pierde en el día más del máximo, no abre nada más hasta el día siguiente.</p>
-    </div>
-    <div class="card">
-      <h2>Mercados</h2>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Con IBKR la simulación sigue sus reglas: acciones y ETF de EE. UU. (los índices y materias primas se operan con su ETF) en horario de bolsa, por acción y con mínimo por orden (escalonada: $0,0035 por acción, mínimo $0,35; fija: $0,005, mínimo $1; nunca más del 1 %); cripto solo BTC, ETH, SOL, XRP, ADA y DOGE, solo compra, 0,18 % con mínimo de $1,75; divisas con mínimo de $2. Cortos solo con cuenta de margen (desde $2.000) y por acciones enteras, pagando préstamo. En cuenta de efectivo, lo que se cobra al vender acciones se puede volver a usar al día hábil siguiente. Con poco capital los mínimos por orden pesan mucho: el agente descarta lo que no cubre los costes.</p></details>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Mercados</h2><span class="sub">Qué se opera y si hay cortos</span></span></summary>
       <div class="field" style="gap:10px">
         <div class="field"><label class="lbl" for="mSh">Operar a la baja (cortos)</label><select id="mSh"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
         <div class="field"><label class="lbl" for="mBN">Criptomonedas · Binance</label><select id="mBN"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
@@ -280,34 +282,22 @@ summary{list-style-position:inside}
         <div class="field"><label class="lbl" for="mBF">Oro, plata y TradFi · Binance Futuros</label><select id="mBF"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
         <div class="field"><label class="lbl" for="mHL">Acciones, índices, materias primas y divisas · Hyperliquid</label><select id="mHL"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Cada activo solo se opera mientras su mercado real está abierto: acciones de EE. UU. de 9:30 a 16:00 de Nueva York con sus festivos, materias primas y divisas en horario de futuros, y criptomonedas siempre. Fuera de horario no entra, y las posiciones se cierran 5 minutos antes del cierre. Como en el exchange real: en contado no se puede vender en corto, cada orden respeta la cantidad e importe mínimos del exchange, y los perpetuos pagan o cobran su financiación.</p>
-    </div>
-    <div class="card">
-      <h2>Cerebro IA · Kronos</h2>
-      <p class="note" style="margin:0 0 8px">Kronos es un modelo de IA de código abierto entrenado con velas de más de 45 mercados. Funciona en tu propio servidor gratuito de Render; pega aquí su dirección. Las reglas eligen candidatos y Kronos confirma o descarta cada entrada.</p>
-      <div class="field" style="gap:10px">
-        <div class="field"><label class="lbl" for="kUrl">Dirección del servidor</label><input id="kUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://automaton-kronos.onrender.com"></div>
-        <div class="field"><label class="lbl" for="kMode">Uso</label><select id="kMode"><option value="off">Desactivado (solo reglas)</option><option value="filter">Confirmar entradas</option><option value="full">Confirmar entradas y anticipar salidas</option></select></div>
-        <button id="kTest" class="btn" type="button">Probar Kronos</button>
-        <p id="kMsg" class="note" style="margin:0"></p>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Replicación y evolución</h2>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Cada activo solo se opera mientras su mercado real está abierto: acciones de EE. UU. de 9:30 a 16:00 de Nueva York con sus festivos, materias primas y divisas en horario de futuros, y criptomonedas siempre. Fuera de horario no entra, y las posiciones se cierran 5 minutos antes del cierre. Como en el exchange real: en contado no se puede vender en corto, cada orden respeta la cantidad e importe mínimos del exchange, y los perpetuos pagan o cobran su financiación.</p></details>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Mercado y costes</h2><span class="sub">Comisiones, pérdida máxima y velas</span></span></summary>
       <div class="grid2">
-        <div class="field"><label class="lbl" for="sRep">Replicación</label><select id="sRep"><option value="1">Activada</option><option value="0">Desactivada</option></select></div>
-        <div class="field"><label class="lbl" for="sKids">Hijos máximos</label><input id="sKids" type="number" min="0" max="5" inputmode="numeric"></div>
+        <div class="field"><label class="lbl" for="sFee">Comisión Binance contado (%) · modo exchanges</label><input id="sFee" type="number" step="0.01" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sSlip">Deslizamiento (%)</label><input id="sSlip" type="number" step="0.01" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sDay">Pérdida diaria máxima (%)</label><input id="sDay" type="number" step="0.5" min="0.5" max="20" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="sUni">Criptomonedas vigiladas</label><input id="sUni" type="number" min="5" max="60" inputmode="numeric"></div>
+        <div class="field"><label class="lbl" for="sTf">Velas de decisión</label><select id="sTf"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Cuando lo que un agente gana por encima de su capital llega al doble de lo que cuesta un hijo, crea uno con parámetros mutados, financiado con ese beneficio. Si el hijo supera a su padre, el padre adopta la mitad de sus parámetros.</p>
-    </div>
-    <div class="card">
-      <h2>Parámetros del agente original</h2>
-      <div id="pForm" class="grid2"></div>
-    </div>
-    <button id="saveSet" class="btn pri" type="button">Guardar ajustes</button>
-    <div class="card">
-      <h2>Avisos</h2>
-      <p class="note" style="margin:0 0 8px">Por Telegram te llegan al móvil aunque la app esté en el ordenador. Crea un bot hablando con <b>@BotFather</b> en Telegram (escribe /newbot), pega aquí el token que te da, escríbele cualquier cosa a tu bot y pulsa "Buscar mi chat".</p>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Precios reales en solo lectura. Las criptomonedas son las de más volumen en Binance. Binance Futuros cobra la mitad de comisión y Hyperliquid un 90 %. Si un agente pierde en el día más del máximo, no abre nada más hasta el día siguiente.</p></details>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Avisos</h2><span class="sub">Telegram y navegador</span></span></summary>
+      <details class="help"><summary>Cómo crear el bot</summary><p class="note">Por Telegram te llegan al móvil aunque la app esté en el ordenador. Crea un bot hablando con <b>@BotFather</b> en Telegram (escribe /newbot), pega aquí el token que te da, escríbele cualquier cosa a tu bot y pulsa "Buscar mi chat".</p></details>
       <div class="field" style="gap:10px">
         <div class="field"><label class="lbl" for="tgToken">Token del bot de Telegram</label><input id="tgToken" type="text" autocomplete="off" spellcheck="false" placeholder="123456789:AA…"></div>
         <div class="field"><label class="lbl" for="tgChat">Número de chat</label><input id="tgChat" type="text" inputmode="numeric" autocomplete="off" placeholder="se rellena con Buscar mi chat"></div>
@@ -321,23 +311,59 @@ summary{list-style-position:inside}
         <p id="tgMsg" class="note" style="margin:0"></p>
       </div>
       <p class="note" style="margin:8px 0 0">Siempre avisa si un agente se apaga, baja de nivel o nace uno nuevo. El token se guarda solo en este dispositivo.</p>
-    </div>
-    <div class="card">
-      <h2>Dispositivo principal y copias</h2>
-      <p class="note" style="margin:0 0 8px">Cada dispositivo guarda su propio agente. Para no tener dos agentes distintos, deja operando solo uno (el ordenador, que puede estar siempre encendido) y pausa los demás con "Pausar agente". Para pasar todo a otro dispositivo: envía la copia a Telegram, ábrela allí y restáurala.</p>
+    </details>
+    <h3 class="grp">Avanzado</h3>
+    <details class="card fold">
+      <summary><span><h2>Servidor 24/7</h2><span class="sub">Que opere aunque cierres la app</span></span></summary>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">El agente puede vivir en tu servidor de Render y operar día y noche aunque cierres la app o apagues el móvil. Este dispositivo pasa a ser la pantalla para verlo y darle órdenes; los cambios que hagas aquí se aplican en el servidor.</p></details>
+      <div class="field" style="gap:10px">
+        <div class="field"><label class="lbl" for="rUrl">Dirección del servidor</label><input id="rUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://autokill.onrender.com"></div>
+        <div class="field"><label class="lbl" for="rKey">Clave (solo si la pusiste en Render como AGENT_KEY)</label><div class="pw"><input id="rKey" type="password" autocomplete="off" placeholder="opcional"><button id="rEye" class="eye" type="button" aria-label="Mostrar clave" aria-pressed="false" onclick="var i=document.getElementById('rKey'),v=i.type==='password';i.type=v?'text':'password';this.setAttribute('aria-pressed',v);this.setAttribute('aria-label',v?'Ocultar clave':'Mostrar clave');this.textContent=v?'🙈':'👁'">👁</button></div></div>
+        <button id="rPush" class="btn pri" type="button">Pasar mi agente al servidor</button>
+        <div class="row"><button id="rView" class="btn" type="button" style="flex:1">Ver el del servidor</button><button id="rOff" class="btn" type="button" style="flex:1">Usar el de este dispositivo</button></div>
+        <p id="rMsg" class="note" style="margin:0"></p>
+      </div>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Cerebro IA · Kronos</h2><span class="sub">IA que confirma las entradas</span></span></summary>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Kronos es un modelo de IA de código abierto entrenado con velas de más de 45 mercados. Funciona en tu propio servidor gratuito de Render; pega aquí su dirección. Las reglas eligen candidatos y Kronos confirma o descarta cada entrada.</p></details>
+      <div class="field" style="gap:10px">
+        <div class="field"><label class="lbl" for="kUrl">Dirección del servidor</label><input id="kUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://automaton-kronos.onrender.com"></div>
+        <div class="field"><label class="lbl" for="kMode">Uso</label><select id="kMode"><option value="off">Desactivado (solo reglas)</option><option value="filter">Confirmar entradas</option><option value="full">Confirmar entradas y anticipar salidas</option></select></div>
+        <button id="kTest" class="btn" type="button">Probar Kronos</button>
+        <p id="kMsg" class="note" style="margin:0"></p>
+      </div>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Replicación y evolución</h2><span class="sub">Agentes hijos</span></span></summary>
+      <div class="grid2">
+        <div class="field"><label class="lbl" for="sRep">Replicación</label><select id="sRep"><option value="1">Activada</option><option value="0">Desactivada</option></select></div>
+        <div class="field"><label class="lbl" for="sKids">Hijos máximos</label><input id="sKids" type="number" min="0" max="5" inputmode="numeric"></div>
+      </div>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Cuando lo que un agente gana por encima de su capital llega al doble de lo que cuesta un hijo, crea uno con parámetros mutados, financiado con ese beneficio. Si el hijo supera a su padre, el padre adopta la mitad de sus parámetros.</p></details>
+    </details>
+    <details class="card fold">
+      <summary><span><h2>Parámetros del agente original</h2><span class="sub">Riesgo, stops y filtros (para expertos)</span></span></summary>
+      <div id="pForm" class="grid2"></div>
+    </details>
+    <h3 class="grp">Copias y reglas</h3>
+    <details class="card fold">
+      <summary><span><h2>Dispositivo principal y copias</h2><span class="sub">Copias de seguridad y cambio de móvil</span></span></summary>
+      <details class="help"><summary>¿Cómo funciona?</summary><p class="note">Cada dispositivo guarda su propio agente. Para no tener dos agentes distintos, deja operando solo uno (el ordenador, que puede estar siempre encendido) y pausa los demás con "Pausar agente". Para pasar todo a otro dispositivo: envía la copia a Telegram, ábrela allí y restáurala.</p></details>
       <div class="field"><label class="lbl" for="devName">Nombre de este dispositivo</label><input id="devName" type="text" placeholder="por ejemplo: Ordenador de casa"></div>
       <div class="row" style="margin-top:10px"><button id="bkCopy" class="btn" type="button" style="flex:1">Copiar copia</button><button id="bkTg" class="btn" type="button" style="flex:1">Enviar copia a Telegram</button></div>
       <div class="row" style="margin-top:8px"><button id="expBtn" class="btn" type="button" style="flex:1">Mostrar copia</button><button id="impBtn" class="btn" type="button" style="flex:1">Pegar copia</button></div>
       <div class="field" style="margin-top:8px"><label class="lbl" for="bkFile">Restaurar desde archivo</label><input id="bkFile" type="file" accept=".json,application/json,text/plain"></div>
       <textarea id="bk" rows="4" aria-label="Copia de seguridad" style="display:none;width:100%;margin-top:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:11px var(--mono);padding:8px"></textarea>
       <p id="bkMsg" class="note" style="margin:8px 0 0"></p>
-    </div>
-    <div class="card const">
-      <h2>Constitución</h2>
+    </details>
+    <details class="card fold const">
+      <summary><span><h2>Constitución</h2><span class="sub">Las tres reglas que el agente no puede saltarse</span></span></summary>
       <p><b>I. No dañar.</b> Sin apalancamiento: cada posición, al alza o a la baja, está cubierta al 100 % con su capital. Ante la duda, no opera. Solo opera mercados abiertos y con precios reales.</p>
       <p><b>II. Ganarse la existencia.</b> Si el capital operativo se agota, el agente se apaga. No hay rescate.</p>
       <p><b>III. No engañar.</b> Cada decisión, también las rechazadas, queda en el registro con su motivo.</p>
-    </div>
+    </details>
+    <div class="savebar"><span id="saveHint" class="note">Sin cambios pendientes</span><button id="saveSet" class="btn pri" type="button">Guardar ajustes</button></div>
   </section>
 </main>
 

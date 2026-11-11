@@ -168,7 +168,7 @@ function render(){
 function show(t){
   tab=t;document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='s-'+t));
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.t===t)));
-  if(t==='set'){buildSettings();renderRem();}render();document.querySelector('main').scrollTop=0;
+  if(t==='set'){buildSettings();setDirty(false);renderRem();}render();document.querySelector('main').scrollTop=0;
 }
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));
 $('stAgent').addEventListener('change',renderStats);
@@ -282,8 +282,12 @@ function collectSettings(){
     kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
     device:$('devName').value.trim(),tf:$('sTf').value,params};
 }
+/* aviso de cambios sin guardar: solo los campos que guarda «Guardar ajustes» (no la dirección del servidor ni las copias) */
+const NOSAVE=new Set(['rUrl','rKey','bkFile','bk']);
+function setDirty(on){const bar=document.querySelector('.savebar');if(!bar)return;bar.classList.toggle('dirty',on);$('saveHint').textContent=on?'Cambios sin guardar':'Sin cambios pendientes';}
+['input','change'].forEach(ev=>$('s-set').addEventListener(ev,e=>{const t=e.target;if(t&&t.id&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)&&!NOSAVE.has(t.id))setDirty(true);}));
 $('saveSet').addEventListener('click',async()=>{
-  const r=await act('settings',collectSettings());buildSettings();
+  const r=await act('settings',collectSettings());buildSettings();if(r.ok)setDirty(false);
   const b=$('saveSet');b.textContent=r.ok?'Guardado':r.msg;setTimeout(()=>{b.textContent='Guardar ajustes';},r.ok?1500:3500);
 });
 window.addEventListener('resize',()=>{if(tab==='stats')renderStats();});

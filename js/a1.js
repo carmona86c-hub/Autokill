@@ -33,7 +33,7 @@ const metaOf=k=>market.meta[k]||(S&&S.meta&&S.meta[k])||null;
 const base=k=>(metaOf(k)&&metaOf(k).name)||k.split(':').pop().replace(/USDT$/,'');
 /* bStocks de Binance: acciones de EE. UU. tokenizadas 1:1 (MUB = Micron, MSTRB = MicroStrategy...). Se compran en Binance como una cripto,
    pero se mueven como acciones: no se les aplica la tendencia del bitcoin ni cuentan en el tope de criptos, y MU y MUB son la misma exposición. */
-const BS_SET=new Set('AAPL MSFT NVDA TSLA AMZN GOOGL GOOG META NFLX AMD INTC MU SNDK SOXL MSTR COIN HOOD PLTR SPY QQQ TQQQ SQQQ IWM DIA GLD SLV CRCL AVGO TSM ASML ORCL CRWV AXTI CBRS EWY IBM GME AMC SMCI ARM UBER BABA QCOM MRVL LLY JPM XOM WMT DIS BA RDDT RBLX SOFI MARA RIOT IONQ RGTI QBTS OKLO SMR HIMS APP ALAB ANET DELL WDC STX LRCX AMAT CRM ADBE SHOP PYPL AFRM NBIS CRWD PANW NET SNOW SPOT ABNB COST UNH NVO RIVN NIO PDD MELI VRT CEG VST GEV BRK GS SPCX TSLL NVDL'.split(' '));
+const BS_SET=new Set('AAPL MSFT NVDA TSLA AMZN GOOGL GOOG META NFLX AMD INTC MU SNDK SOXL MSTR COIN HOOD PLTR SPY QQQ TQQQ SQQQ IWM DIA GLD SLV CRCL AVGO TSM ASML ORCL CRWV AXTI CBRS EWY IBM GME AMC SMCI ARM UBER BABA QCOM MRVL LLY JPM XOM WMT DIS BA RDDT RBLX SOFI MARA RIOT IONQ RGTI QBTS OKLO SMR HIMS APP ALAB ANET DELL WDC STX LRCX AMAT CRM ADBE SHOP PYPL AFRM NBIS CRWD PANW NET SNOW SPOT ABNB COST UNH NVO RIVN NIO PDD MELI VRT CEG VST GEV BRK GS SPCX TSLL NVDL SKHY'.split(' '));
 const _bs=new Map();
 const isBS=k=>{if(_bs.has(k))return _bs.get(k);let r=false;if(srcOf(k)==='BN'){const n=String(base(k)).toUpperCase(),u=n.slice(0,-1);
   r=n.length>=3&&n.endsWith('B')&&n!=='BNB'&&(BS_SET.has(u)||((typeof market!=='undefined'&&market.universe)||[]).some(x=>srcOf(x)!=='BN'&&catOf(x)!=='Cripto'&&String(base(x)).toUpperCase()===u));}
@@ -108,6 +108,8 @@ async function uniBN(){
   const t=await jget('/api/v3/ticker/24hr');
   const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
+  /* con IBKR + Binance también se siguen todas las acciones de Binance (bStocks), aunque no estén entre las de más volumen: son la otra vía para comprar acciones */
+  if(isMix()){const has=new Set(list.map(x=>x.symbol));t.forEach(x=>{const n=x.symbol.slice(0,-4);if(x.symbol.endsWith('USDT')&&!has.has(x.symbol)&&n.length>=3&&n.endsWith('B')&&n!=='BNB'&&BS_SET.has(n.slice(0,-1))&&+x.lastPrice>0&&+x.quoteVolume>0)list.push(x);});}
   market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
   await bnSpotRules(list.map(x=>x.symbol));
   market.cryptoSpot=S.settings.cryptoFut!==false;ok('BN');
@@ -160,7 +162,7 @@ async function loadUniverse(){
   await Promise.all(j2);
   market.universe=[...market.lists.BN,...market.lists.BF,...market.lists.HL].sort((a,b)=>(market.meta[b].vol||0)-(market.meta[a].vol||0));
   /* con IBKR solo se vigila lo que IBKR permite operar */
-  if(isIB())market.universe=market.universe.filter(ibOK);
+  if(isIB())market.universe=market.universe.filter(k=>ibOK(k)||bsAlt(k));
   market.uniAt=Date.now();
   market.err=Object.values(market.src).some(x=>x.ok)?null:'ninguna fuente responde';
 }

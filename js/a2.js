@@ -378,30 +378,38 @@ function sizeOn(a,an,P,cash){
 }
 /* comisiones de entrar y salir con esa cantidad en un bróker */
 const rtFee=(v,k,q,px,sh)=>inV(v,()=>feeAmt(k,q,px,sh)+feeAmt(k,q,px,!sh));
+/* la misma acción en Binance (bStock, respaldada 1 a 1): con IBKR + Binance es otra vía para comprarla, por trozos.
+   Se usa su precio real en Binance; la distancia del stop y del objetivo se escala a ese precio. */
+function bsAlt(k){if(!isMix()||srcOf(k)==='BN'||catOf(k)!=='Acciones')return null;const n=String(base(k)).toUpperCase()+'B';
+  return (market.lists.BN||[]).find(x=>srcOf(x)==='BN'&&String(base(x)).toUpperCase()===n&&isBS(x))||null;}
+function bsAn(an){const k=bsAlt(an.sym);if(!k||!pxFresh(k,90000)||!(an.price>0))return null;const p=market.price[k],f=p/an.price;
+  return Object.assign({},an,{sym:k,price:p,last:an.last*f,atr:an.atr*f,atrPct:an.atrPct,tick:0,sessAs:sessOf(an.sym)==='24x7'?null:sessOf(an.sym),via:an.sym});}
 function openPos(a,an,P){
   if(!isMix()){const r=sizeOn(a,an,P,freeCash(a));return r.err||openOn(a,an,P,r,null,null);}
-  const vs=vensOf(an.sym);if(!vs.length)return 'no disponible en IBKR ni en Binance';
-  const R=routeOf(),tries=vs.map(v=>({v,r:inV(v,()=>sizeOn(a,an,P,freeV(a,v)))}));
+  const ways=[...(ibOK(an.sym)?vensOf(an.sym).map(v=>({v,an})):[])];{const b=bsAn(an);if(b)ways.push({v:'BN',an:b});}
+  const vs=ways.map(w=>w.v);if(!vs.length)return 'no disponible en IBKR ni en Binance';
+  const R=routeOf(),tries=ways.map(w=>({v:w.v,an:w.an,r:inV(w.v,()=>sizeOn(a,w.an,P,freeV(a,w.v)))}));
   /* el bróker que sería más barato para el tamaño que quiere el agente: si ahí faltó dinero, cuenta para recomendar el reparto */
-  const pref=vs.length>1?vs.slice().sort((x,y)=>inV(x,()=>feeOf(an.sym))-inV(y,()=>feeOf(an.sym)))[0]:vs[0];
+  const pref=vs.length>1?ways.slice().sort((x,y)=>inV(x.v,()=>feeOf(x.an.sym))-inV(y.v,()=>feeOf(y.an.sym)))[0].v:vs[0];
   tries.forEach(t=>{if(t.v===pref&&t.r.lack)R.miss[t.v]++;});
   const ok=tries.filter(t=>!t.r.err);
   if(!ok.length){const t=tries.find(x=>x.v===pref)||tries[0];return t.r.err+(vs.length>1?` (ni en ${VN[vs[0]]} ni en ${VN[vs[1]]})`:` en ${VN[t.v]}`);}
-  ok.forEach(t=>{t.c=rtFee(t.v,an.sym,t.r.qty,t.r.entry,t.r.sh)/t.r.cost;});
-  ok.sort((x,y)=>x.c-y.c);const best=ok[0],alt=vs.find(v=>v!==best.v);
+  ok.forEach(t=>{t.c=rtFee(t.v,t.an.sym,t.r.qty,t.r.entry,t.r.sh)/t.r.cost;});
+  ok.sort((x,y)=>x.c-y.c);const best=ok[0],altW=ways.find(w=>w.v!==best.v),alt=altW&&altW.v;
   /* ahorro frente al otro bróker con la misma orden (negativo si el barato no tenía dinero y tocó usar el caro) */
-  const saved=alt?rtFee(alt,an.sym,best.r.qty,best.r.entry,best.r.sh)-rtFee(best.v,an.sym,best.r.qty,best.r.entry,best.r.sh):null;
+  const saved=alt?rtFee(alt,altW.an.sym,best.r.qty,best.r.entry,best.r.sh)-rtFee(best.v,best.an.sym,best.r.qty,best.r.entry,best.r.sh):null;
   R.opens[best.v]++;if(saved!=null){R.saved+=saved;R.nSaved++;}
-  return inV(best.v,()=>openOn(a,an,P,best.r,best.v,saved));
+  return inV(best.v,()=>openOn(a,best.an,P,best.r,best.v,saved));
 }
 function openOn(a,an,P,r,ven,saved){
   const {qty,entry,cost,f,sh,stopDist}=r;
   a.cash-=cost+f;
   const p={sym:an.sym,side:an.side||'long',tf:an.tf,until:Date.now()+P.maxHold*TF_MS[an.tf],fees:f,qty,entry,stop:sh?entry+stopDist:entry-stopDist,tp:rp(an.sym,sh?entry-P.tpATR*an.atr:entry+P.tpATR*an.atr),risk:stopDist,high:entry,low:entry,atr:an.atr,openedAt:Date.now(),bars:0,basis:cost+f,kr:an.kr||null};
   if(ven){p.ven=ven;if(saved!=null)p.saved=saved;}
+  if(an.sessAs)p.sessAs=an.sessAs; /* comprada en Binance por una señal de la acción: se vende antes del cierre de la bolsa, como la acción */
   syncStop(p);logOrder(a,p,'abrir',sh?'SELL':'BUY',qty,entry,f);
   a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym],ruleOf(an.sym)?{rule:ruleOf(an.sym)}:{});
-  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${isBS(an.sym)?'acción tokenizada':catOf(an.sym)})${ven?' en '+VN[ven]+(saved>0.005?` (ahorra ${money(saved)} frente a ${VN[ven==='IB'?'BN':'IB']})`:''):''} ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
+  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${isBS(an.sym)?'acción tokenizada':catOf(an.sym)}${an.via?', señal de '+base(an.via)+': en IBKR no cabía o salía más caro':''})${ven?' en '+VN[ven]+(saved>0.005?` (ahorra ${money(saved)} frente a ${VN[ven==='IB'?'BN':'IB']})`:''):''} ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
   return null;
 }
 /* ---------- bolsillos por bróker ----------
@@ -460,7 +468,7 @@ function closePos0(a,p,reason,at,user){
 function checkExits(a){
   if(a.status!=='alive')return;
   for(const p of a.positions.slice()){
-    const cls=sessOf(p.sym);
+    const cls=p.sessAs||sessOf(p.sym);
     if(!sessOpen(cls,Date.now())){
       /* el mercado cerró mientras la app estaba en pausa: se liquida al último precio de la sesión real */
       const k=kOf(p.tf||S.settings.tf,p.sym),last=k&&k.length&&k[k.length-1].ct>p.openedAt?k[k.length-1].c:null;
@@ -539,7 +547,7 @@ function decide(a,an,P,T,pre){
   const sh=an.side==='short';
   if(sh&&!S.settings.shorts)return 'cortos desactivados';
   if(sh&&!canShort(an.sym))return isIB()?(ibClass(an.sym)==='crypto'?'IBKR no permite cortos en cripto':'cortos solo con cuenta de margen (desde $2.000)'):'en contado no se puede vender en corto';
-  if(isIB()&&!ibOK(an.sym))return isMix()?'no disponible en IBKR ni en Binance con ese nombre':'no disponible en IBKR con ese nombre';
+  if(isIB()&&!ibOK(an.sym)&&!bsAlt(an.sym))return isMix()?'no disponible en IBKR ni en Binance con ese nombre':'no disponible en IBKR con ese nombre';
   if(!an.trend)return sh?'sin tendencia bajista':'sin tendencia alcista';
   if(!sh&&an.rsi>P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrecomprado`;
   if(!sh&&an.rsi<P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin fuerza`;

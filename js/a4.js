@@ -291,10 +291,13 @@ function stats(a){
   const gw=w.reduce((t,x)=>t+x.pnl,0),gl=-l.reduce((t,x)=>t+x.pnl,0),aw=w.length?gw/w.length:0,al=l.length?gl/l.length:0;
   /* salud: lo que deja de media cada operación, cuánto se gana por cada unidad perdida y el acierto mínimo para no perder */
   const mf=c.filter(x=>x.mfe!=null),lm=mf.filter(x=>x.pnl<=0);
+  /* comisiones: lo que se ha llevado el broker en las operaciones que lo tienen medido */
+  const fc=c.filter(x=>x.fees!=null),fee=fc.reduce((t,x)=>t+x.fees,0),fgross=fc.reduce((t,x)=>t+x.pnl+x.fees,0);
   return {n:c.length,hit:c.length?w.length/c.length:0,aw,al,pf:gl>0?gw/gl:(gw>0?Infinity:0),
     best:c.length?Math.max(...c.map(x=>x.pnl)):0,worst:c.length?Math.min(...c.map(x=>x.pnl)):0,dd:a.maxDD,ret:ret(a),pnl:total(a)-a.initial,
     exp:c.length?(gw-gl)/c.length:0,payoff:al>0?aw/al:(aw>0?Infinity:0),need:aw+al>0?al/(aw+al):0,
-    nm:mf.length,lostRun:lm.length?lm.filter(x=>x.mfe>=1).length/lm.length:null,mfeW:mf.filter(x=>x.pnl>0).length?mf.filter(x=>x.pnl>0).reduce((t,x)=>t+x.mfe,0)/mf.filter(x=>x.pnl>0).length:null};
+    nm:mf.length,lostRun:lm.length?lm.filter(x=>x.mfe>=1).length/lm.length:null,mfeW:mf.filter(x=>x.pnl>0).length?mf.filter(x=>x.pnl>0).reduce((t,x)=>t+x.mfe,0)/mf.filter(x=>x.pnl>0).length:null,
+    fn:fc.length,fee,fgross};
 }
 function renderStats(){
   const sel=$('stAgent');
@@ -307,6 +310,7 @@ function renderStats(){
     k('Deja por operación',s.n?sgn(s.exp||0):'—',(s.exp||0)>=0?'up':'down')+k('Gana por cada $1 perdido',s.n&&s.payoff!=null?(isFinite(s.payoff)?'$'+s.payoff.toFixed(2).replace('.',','):'∞'):'—',(s.payoff||0)>=1?'up':'down')+
     k('Acierto necesario',s.n&&s.need!=null?Math.round(s.need*100)+'% (tienes '+Math.round(s.hit*100)+'%)':'—',s.n&&s.hit>=s.need?'up':'down')+
     k('Muestra',s.n?(s.n<100?s.n+' ops · aún poca':s.n+' ops · fiable'):'—',s.n>=100?'up':'')+
+    (s.fn?k('Comisiones pagadas',money(s.fee)+' en '+s.fn+' ops','down')+k('Sin comisiones habría sido',sgn(s.fgross),s.fgross>=0?'up':'down'):'')+
     (s.nm?k('Pérdidas que fueron +1R a favor',s.lostRun==null?'—':Math.round(s.lostRun*100)+'%',s.lostRun>.25?'down':'up')+k('Recorrido medio de las ganadoras',s.mfeW==null?'—':s.mfeW.toFixed(1)+'R'):'');
   $('trades').innerHTML=a.closed.length?`<table><tr><th>Activo</th><th>Entrada</th><th>Salida</th><th>Resultado</th><th>Motivo</th></tr>${a.closed.slice(0,40).map(t=>`<tr><td>${esc(base(t.sym))}${t.side==='short'?' <span class="side s">corto</span>':''}</td><td>${px(t.entry)}</td><td>${px(t.exit)}</td><td class="${t.pnl>=0?'up':'down'}">${sgn(t.pnl)} ${pct(t.pct,1)}</td><td>${esc(t.reason)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin operaciones cerradas.</div>';
   const ex=Object.entries(S.exp).sort((x,y)=>y[1].n-x[1].n);

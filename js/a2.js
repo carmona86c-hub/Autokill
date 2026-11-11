@@ -209,7 +209,14 @@ const onIB=k=>isIB()&&venOf(k)==='IB';
 const splitIB=()=>{const v=S&&S.settings.split;return v>=0&&v<=1?v:.7;};
 const IB_CRYPTO=new Set(['BTC','ETH','SOL','XRP','ADA','DOGE']);
 const ibClass=k=>{const c=catOf(k);return c==='Cripto'?'crypto':c==='Divisas'?'fx':'stk';};
-function ibOK(k){const m=metaOf(k)||{};if(catOf(k)==='Cripto')return isMix()?vensOf(k).length>0:IB_CRYPTO.has(base(k));return !['hk','krx','shanghai'].includes(m.sess);}
+/* IBKR solo recibe lo que existe allí con ese mismo nombre: acciones y ETF de EE. UU., cripto de Zero Hash y divisas.
+   Índices y materias primas (XYZ100, SP500, oro, plata, petróleo…) se ven con el precio del contrato, que no es el de ningún ETF:
+   una orden real con ese nombre se rechazaría, así que no se envían a IBKR (el Nasdaq y el S&P 500 ya están como QQQ y SPY).
+   Tampoco empresas que no cotizan en EE. UU. (coreanas, chinas, aún sin salir a bolsa). */
+const IB_NOT_US=new Set(['SKHY','SMSN','ANT','UNITREE','OPENAI','XAI','ANTHROPIC','KIOXIA','BYTEDANCE','STRIPE','DATABRICKS']);
+function ibOK(k){const m=metaOf(k)||{},c=catOf(k);if(c==='Cripto')return isMix()?vensOf(k).length>0:IB_CRYPTO.has(base(k));
+  if(c==='Índices'||c==='Materias primas'||c==='TradFi')return false;if(c==='Acciones'&&IB_NOT_US.has(String(base(k)).toUpperCase()))return false;
+  return !['hk','krx','shanghai'].includes(m.sess);}
 const IB_MARGIN=2000;
 const marginOK=()=>S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0)*(isMix()?splitIB():1)>=IB_MARGIN;
 const feeRate0=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
@@ -240,11 +247,12 @@ function feeOf(k){
    Las cantidades se redondean hacia abajo al paso permitido, como haría el exchange; una orden que el exchange rechazaría, aquí también se rechaza. */
 function ruleOf(k){
   if(onIB(k)){const cl=ibClass(k),p=market.price[k]||0;
-    return cl==='crypto'?{step:1e-8,minNot:1,venue:'IBKR · cripto'}:cl==='fx'?{step:1,minNot:1,venue:'IBKR · divisas'}:{step:1e-4,minNot:1,tick:p>=1?.01:.0001,venue:'IBKR · '+(catOf(k)==='Acciones'?'acciones EE. UU.':'ETF EE. UU.')};}
+    return cl==='crypto'?{step:1e-8,minNot:1,venue:'IBKR · cripto'}:cl==='fx'?{step:1,minNot:1,venue:'IBKR · divisas'}:{step:1,minQty:1,minNot:1,tick:p>=1?.01:.0001,venue:'IBKR · '+(catOf(k)==='Acciones'?'acciones EE. UU.':'ETF EE. UU.')};}
   return (market.rules&&market.rules[k])||(S.meta&&S.meta[k]&&S.meta[k].rule)||null;
 }
 /* en IBKR los cortos de acciones van por acciones enteras */
-const wholeOnly=(k,sh)=>onIB(k)&&sh&&ibClass(k)==='stk';
+/* IBKR solo admite fracciones de acción desde sus apps, no por programa (su API): un bot real solo puede comprar y vender acciones enteras */
+const wholeOnly=(k,sh)=>onIB(k)&&ibClass(k)==='stk';
 /* dinero disponible: en cuenta de efectivo, lo que viene de vender acciones no se puede usar hasta que se liquida (día hábil siguiente) */
 function freeCash(a){const n=Date.now();if(a.unset)a.unset=a.unset.filter(x=>x.at>n);return a.cash-(a.unset||[]).reduce((t,x)=>t+x.amt,0);}
 function settle(a,p,amt){if(onIB(p.sym)&&ibClass(p.sym)==='stk'&&!marginOK()&&amt>0){const at=nextOpen('us',Date.now()+3600e3);if(at)(a.unset=a.unset||[]).push({amt,at});}}
@@ -358,10 +366,12 @@ function sizeOn(a,an,P,cash){
   qty=Math.min(want,cash/(entry*(1+fee)));
   qty=wholeOnly(an.sym,sh)?Math.floor(qty):rq(an.sym,qty);
   if(qty*entry<mn&&!wholeOnly(an.sym,sh)){const up=rq(an.sym,mn*1.01/entry,true);if(up*entry*(1+fee)<=cash&&up*entry<=Math.max(cap,mn*1.2))qty=up;}
-  if(wholeOnly(an.sym,sh)&&qty<1)return {err:'en corto IBKR solo admite acciones enteras y no cabe ni una',lack};
+  /* una acción entera que se pase un poco del tamaño habitual se admite si su riesgo sigue dentro de lo permitido */
+  if(wholeOnly(an.sym,sh)&&qty<1&&entry*(1+fee)<=cash&&entry<=Math.max(cap,mn)*1.25&&stopDist<=e*P.riskPct*T.risk*1.5)qty=1;
+  if(wholeOnly(an.sym,sh)&&qty<1)return {err:'IBKR por programa solo admite acciones enteras y no cabe ni una',lack};
   const bad=vet(an.sym,qty,entry);if(bad)return {err:bad,lack};
   /* la comisión real puede ser algo mayor que la estimada (mínimo por orden): si no cabe, se ajusta la cantidad al efectivo disponible */
-  {const f0=feeAmt(an.sym,qty,entry,sh);if(qty*entry+f0>cash&&!wholeOnly(an.sym,sh)){qty=rq(an.sym,Math.max(0,cash-f0-1e-6)/entry);const b2=vet(an.sym,qty,entry);if(b2)return {err:b2,lack};}}
+  {const f0=feeAmt(an.sym,qty,entry,sh);if(qty*entry+f0>cash){const w=Math.max(0,cash-f0-1e-6)/entry;qty=wholeOnly(an.sym,sh)?Math.floor(w):rq(an.sym,w);const b2=vet(an.sym,qty,entry);if(b2)return {err:b2,lack};}}
   const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);
   if(cost+f>cash+1e-9)return {err:`efectivo disponible insuficiente (${money(cash)}${cash<a.cash-.005&&!isMix()?', el resto aún se está liquidando':''})`,lack};
   return {err:null,lack,qty,entry,cost,f,sh,stopDist};
@@ -529,7 +539,7 @@ function decide(a,an,P,T,pre){
   const sh=an.side==='short';
   if(sh&&!S.settings.shorts)return 'cortos desactivados';
   if(sh&&!canShort(an.sym))return isIB()?(ibClass(an.sym)==='crypto'?'IBKR no permite cortos en cripto':'cortos solo con cuenta de margen (desde $2.000)'):'en contado no se puede vender en corto';
-  if(isIB()&&!ibOK(an.sym))return isMix()?'no disponible en IBKR ni en Binance':'no disponible en IBKR';
+  if(isIB()&&!ibOK(an.sym))return isMix()?'no disponible en IBKR ni en Binance con ese nombre':'no disponible en IBKR con ese nombre';
   if(!an.trend)return sh?'sin tendencia bajista':'sin tendencia alcista';
   if(!sh&&an.rsi>P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrecomprado`;
   if(!sh&&an.rsi<P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin fuerza`;

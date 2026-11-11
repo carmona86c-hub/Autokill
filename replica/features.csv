@@ -1,0 +1,23 @@
+feature,area,priority,original,clone,notes
+Operar 24/7 sin el móvil abierto,servidor,must,yes,partial,Render gratuito se suspendió el 26 oct y nadie se enteró; ahora hay alerta y despertador
+Alerta si el bot se para,servidor,must,yes,yes,nuevo: aviso en el panel + notificación + Telegram
+Simulación con dinero ficticio y precios reales,núcleo,must,yes,yes,
+Comisiones y reglas reales del broker (IBKR),núcleo,must,yes,yes,
+Stop loss en cada posición,riesgo,must,yes,yes,
+Trailing stop,riesgo,must,yes,yes,
+Límite de pérdida diaria,riesgo,must,yes,yes,
+No duplicar exposición al mismo activo,riesgo,must,yes,yes,corregido: NVDA/AMD/TSLA... se abrían dos veces por dos vías
+Esperas medidas en velas de la propia operación,núcleo,must,yes,yes,corregido: las de 1 h se cerraban a los 80 min
+Ver comisiones pagadas,transparencia,should,yes,yes,nuevo: KPI y línea en el informe
+Registro de cada decisión con su motivo,transparencia,should,yes,yes,
+Backtest de variantes antes de cambiar reglas,estrategia,should,yes,yes,automejora con validación en dos periodos
+Comparar simulado vs real,transparencia,should,yes,partial,automejora guarda simulado; sin vista lado a lado
+Varios mercados (cripto/acciones/ETF/divisas),mercados,should,yes,yes,
+Cortos,mercados,could,yes,yes,solo con cuenta de margen IBKR
+Avisos por Telegram,avisos,should,yes,yes,
+App instalable en el móvil,interfaz,should,yes,yes,PWA
+Modo oscuro legible (contraste AA),interfaz,should,yes,yes,
+Modo claro legible (contraste AA),interfaz,should,yes,yes,corregido: 9 pares de color fallaban
+Dinero real con conector al broker,ejecución,could,yes,skip,prohibido por ahora: solo dinero ficticio
+Bots de rejilla y DCA,estrategia,could,yes,no,otro tipo de estrategia; fuera del alcance
+Mercado de señales/copiar a otros,social,could,yes,skip,no aplica a un agente propio

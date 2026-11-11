@@ -441,6 +441,7 @@ function protGuard(a,an,P){
   if(isStk(k)&&sessOf(k)==='us'){const p=etP(now);if(p.m<585)return 'apertura de la bolsa: primeros 15 min, precios erráticos';
     const g=gapOf(k);if(g!=null&&Math.abs(g)>.04)return `día de noticias: abrió con un salto del ${pct(g,1)} (resultados u otra noticia)`;
     if(catOf(k)==='Acciones'){const nd=ndxTrend(P);if(nd&&((sh&&nd==='up')||(!sh&&nd==='down')))return `contra la tendencia del Nasdaq (${nd==='up'?'alcista':'bajista'})`;}}
+  if(isBS(k)){const nd=ndxTrend(P);if(nd&&((sh&&nd==='up')||(!sh&&nd==='down')))return `contra la tendencia del Nasdaq (${nd==='up'?'alcista':'bajista'})`;}
   const c=kOf(an.tf,k),e=effOf(c);if(e!=null&&e<.2)return `mercado de lado: en las últimas 20 velas de ${an.tf} se mueve sin dirección clara (eficiencia ${Math.round(e*100)} %)`;
   const nv=nervOf(c);an.nerv=nv!=null&&nv>1.8?nv:0;an.prob=!!(st&&st.prob);
   return null;
@@ -470,7 +471,7 @@ const SIG_MAX=1500,SIG_N=40,SIG_T=2.5;
 const SIG_FK=['lado','mercado','velas','mercado y lado','puntuación','RSI','ruptura','volumen','eficiencia','nerviosismo','volatilidad (ATR %)','tendencia 1 h','últimas 24 h','últimos 5 días','fuerza frente a su mercado (4 h)','fuerza frente a su mercado (24 h)','tendencia de su mercado','hora','día','experiencia'];
 const sigOf=()=>S.sig||(S.sig={list:[],open:[],sum:null,act:{block:{},off:{}},at:0,sumAt:0});
 const ret1h=(k,n)=>{const c=kOf('1h',k);if(!c||c.length<=n)return null;return c[c.length-1].c/c[c.length-1-n].c-1;};
-const refOf=k=>catOf(k)==='Cripto'?uni().find(x=>catOf(x)==='Cripto'&&base(x)==='BTC'):isStk(k)?(ndxC.k||uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(base(x).toUpperCase()))):null;
+const refOf=k=>catOf(k)==='Cripto'&&!isBS(k)?uni().find(x=>catOf(x)==='Cripto'&&base(x)==='BTC'):(isStk(k)||isBS(k))?(ndxC.k||uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(base(x).toUpperCase()))):null;
 const band=(v,cuts,labs)=>{if(v==null||!isFinite(v))return 'sin dato';for(let i=0;i<cuts.length;i++)if(v<cuts[i])return labs[i];return labs[labs.length-1];};
 function sigFeat(a,an,P){
   const k=an.sym,sh=an.side==='short',d=sh?-1:1,c=kOf(an.tf,k)||[],n=c.length-1,f={};
@@ -488,7 +489,7 @@ function sigFeat(a,an,P){
   {const rf=refOf(k);if(rf&&rf!==k){const a4=ret1h(k,4),b4=ret1h(rf,4),a24=ret1h(k,24),b24=ret1h(rf,24);
     f['fuerza frente a su mercado (4 h)']=band(a4==null||b4==null?null:d*(a4-b4)*100,[-1,-.25,.25,1],['mucho más débil','más débil','igual','más fuerte','mucho más fuerte']);
     f['fuerza frente a su mercado (24 h)']=band(a24==null||b24==null?null:d*(a24-b24)*100,[-2,-.5,.5,2],['mucho más débil','más débil','igual','más fuerte','mucho más fuerte']);}}
-  {const r=catOf(k)==='Cripto'?btcTrend(P):isStk(k)?ndxTrend(P):null;f['tendencia de su mercado']=r==null?'sin dato':(r==='up')===!sh?'a favor':'en contra';}
+  {const r=catOf(k)==='Cripto'&&!isBS(k)?btcTrend(P):(isStk(k)||isBS(k))?ndxTrend(P):null;f['tendencia de su mercado']=r==null?'sin dato':(r==='up')===!sh?'a favor':'en contra';}
   {const t=Date.now();if(isStk(k)){const p=etP(t);f.hora='NY '+band(p.m/60,[10,11,12,13,14,15],['9:30-10','10-11','11-12','12-13','13-14','14-15','15-16']);}
     else{const hu=new Date(t).getUTCHours();f.hora='UTC '+band(hu,[4,8,12,16,20],['0-4','4-8','8-12','12-16','16-20','20-24']);}
     f.día=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][new Date(t).getUTCDay()];}

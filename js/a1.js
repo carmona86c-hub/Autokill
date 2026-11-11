@@ -31,6 +31,14 @@ const srcOf=k=>k.slice(0,2),idOf=k=>k.slice(3);
 /* datos de cada activo: los del mercado y, para posiciones abiertas, una copia guardada (sobrevive a recargas) */
 const metaOf=k=>market.meta[k]||(S&&S.meta&&S.meta[k])||null;
 const base=k=>(metaOf(k)&&metaOf(k).name)||k.split(':').pop().replace(/USDT$/,'');
+/* bStocks de Binance: acciones de EE. UU. tokenizadas 1:1 (MUB = Micron, MSTRB = MicroStrategy...). Se compran en Binance como una cripto,
+   pero se mueven como acciones: no se les aplica la tendencia del bitcoin ni cuentan en el tope de criptos, y MU y MUB son la misma exposición. */
+const BS_SET=new Set('AAPL MSFT NVDA TSLA AMZN GOOGL GOOG META NFLX AMD INTC MU SNDK SOXL MSTR COIN HOOD PLTR SPY QQQ TQQQ SQQQ IWM DIA GLD SLV CRCL AVGO TSM ASML ORCL CRWV AXTI CBRS EWY IBM GME AMC SMCI ARM UBER BABA QCOM MRVL LLY JPM XOM WMT DIS BA RDDT RBLX SOFI MARA RIOT IONQ RGTI QBTS OKLO SMR HIMS APP ALAB ANET DELL WDC STX LRCX AMAT CRM ADBE SHOP PYPL AFRM NBIS CRWD PANW NET SNOW SPOT ABNB COST UNH NVO RIVN NIO PDD MELI VRT CEG VST GEV BRK GS SPCX TSLL NVDL'.split(' '));
+const _bs=new Map();
+const isBS=k=>{if(_bs.has(k))return _bs.get(k);let r=false;if(srcOf(k)==='BN'){const n=String(base(k)).toUpperCase(),u=n.slice(0,-1);
+  r=n.length>=3&&n.endsWith('B')&&n!=='BNB'&&(BS_SET.has(u)||((typeof market!=='undefined'&&market.universe)||[]).some(x=>srcOf(x)!=='BN'&&catOf(x)!=='Cripto'&&String(base(x)).toUpperCase()===u));}
+  if(r||((typeof market!=='undefined'&&market.universe)||[]).length)_bs.set(k,r);return r;};
+const ubase=k=>{const n=String(base(k)).toUpperCase();return isBS(k)?n.slice(0,-1):n;};
 const catOf=k=>(metaOf(k)&&metaOf(k).cat)||(srcOf(k)==='BN'?'Cripto':'Otros');
 /* cada precio guarda cuándo llegó: nunca se decide ni se ejecuta con precios viejos */
 function setPx(k,v){if(v>0&&isFinite(v)){market.price[k]=v;market.pt[k]=Date.now();}}

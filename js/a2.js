@@ -391,7 +391,7 @@ function openOn(a,an,P,r,ven,saved){
   if(ven){p.ven=ven;if(saved!=null)p.saved=saved;}
   syncStop(p);logOrder(a,p,'abrir',sh?'SELL':'BUY',qty,entry,f);
   a.positions.push(p);S.meta=S.meta||{};if(market.meta[an.sym])S.meta[an.sym]=Object.assign({},market.meta[an.sym],ruleOf(an.sym)?{rule:ruleOf(an.sym)}:{});
-  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${catOf(an.sym)})${ven?' en '+VN[ven]+(saved>0.005?` (ahorra ${money(saved)} frente a ${VN[ven==='IB'?'BN':'IB']})`:''):''} ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
+  L(a,'open',`${sh?'Abre corto en':'Compra'} ${base(an.sym)} (${isBS(an.sym)?'acción tokenizada':catOf(an.sym)})${ven?' en '+VN[ven]+(saved>0.005?` (ahorra ${money(saved)} frente a ${VN[ven==='IB'?'BN':'IB']})`:''):''} ${money(cost)} @ ${px(entry)} · stop ${px(p.stop)} · objetivo ${px(p.tp)} · puntuación ${an.score} en velas de ${an.tf}${an.kr?` · Kronos prevé ${pct(an.kr.ret)} (${Math.round(an.kr.up*100)}% de escenarios)`:''}`);
   return null;
 }
 /* ---------- bolsillos por bróker ----------
@@ -543,13 +543,13 @@ function decide(a,an,P,T,pre){
   if(an.atrPct>.06)return 'volatilidad excesiva';
   if(P.tpATR*an.atrPct<Math.max(.006,3*costOf(an.sym)))return 'objetivo no cubre los costes (pide 3 veces la comisión)';
   if(an.tick&&(an.tick/an.price>.0008||P.stopATR*an.atr<8*an.tick))return `precio a saltos demasiado grandes (paso ${px(an.tick)})`;
-  if(catOf(an.sym)==='Cripto'&&base(an.sym)!=='BTC'){const bt=btcTrend(P);if(bt&&((sh&&bt==='up')||(!sh&&bt==='down')))return `contra la tendencia del bitcoin (${bt==='up'?'alcista':'bajista'})`;}
+  if(catOf(an.sym)==='Cripto'&&!isBS(an.sym)&&base(an.sym)!=='BTC'){const bt=btcTrend(P);if(bt&&((sh&&bt==='up')||(!sh&&bt==='down')))return `contra la tendencia del bitcoin (${bt==='up'?'alcista':'bajista'})`;}
   if(sh?an.price<an.last-an.atr:an.price>an.last+an.atr)return 'el precio ya se escapó de la señal';
   if((a.cooldown[an.sym]||0)>Date.now())return 'en espera tras una pérdida reciente';
   if(a.positions.length>=Math.min(P.maxPos,T.pos))return 'máximo de posiciones para su nivel';
-  {const lim=Math.min(4,Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75)));if(catOf(an.sym)==='Cripto'&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
+  {const lim=Math.min(4,Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75)));if(catOf(an.sym)==='Cripto'&&!isBS(an.sym)&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&!isBS(p.sym)&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
   /* el mismo activo por otra vía (p. ej. NVDA en Binance Futuros y en Hyperliquid) es la misma exposición: no se duplica */
-  if(a.positions.some(p=>p.sym===an.sym||base(p.sym).toUpperCase()===base(an.sym).toUpperCase()))return 'ya en cartera';
+  if(a.positions.some(p=>p.sym===an.sym||ubase(p.sym)===ubase(an.sym)))return 'ya en cartera';
   if(!pre&&krOn()){
     const f=krOf(an.sym,an.tf);
     if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}

@@ -23,6 +23,8 @@ const STABLE=new Set(['USDC','FDUSD','TUSD','USDP','DAI','USDE','EUR','EURI','AE
 const SRCNAME={BN:'Binance',BF:'Binance Futuros',HL:'Hyperliquid'};
 const CAT_IDX=new Set(['XYZ100','US500','SPX','SP500','USA500','NDX','NAS100','NASDAQ','US100','USTECH','DJI','US30','DOW','RUSSELL','RUT','US2000','JP225','NIKKEI','DAX','GER40','DE40','UK100','FTSE','HK50','HSI','KOSPI','EU50','STOXX','CAC40','VIX','SMALL2000','MAG7','SEMIS']);
 const CAT_COM=new Set(['GOLD','SILVER','XAU','XAG','CL','OIL','WTI','BRENT','USOIL','UKOIL','NATGAS','NG','GAS','COPPER','HG','PLATINUM','PLAT','XPT','PALLADIUM','XPD','URANIUM','URNM','CORN','WHEAT','SOY','SOYBEAN','COFFEE','COCOA','SUGAR','COTTON','LUMBER','ALUMINIUM','ALUMINUM','NICKEL','ZINC']);
+/* materias primas con otros nombres (BRENTOIL, CRUDEOIL, NATURALGAS…): un nombre así nunca es una acción */
+const isCom=n=>{n=String(n||'').toUpperCase();return CAT_COM.has(n)||/OIL|NATGAS|NATURALGAS|GASOLINE|GOLD|SILVER|COPPER|PLATIN|PALLAD|URANIUM|COFFEE|COCOA|SUGAR|WHEAT|CORN|SOYBEAN|COTTON|LUMBER/.test(n);};
 const CAT_FX=new Set(['EUR','JPY','GBP','CHF','AUD','CAD','NZD','MXN','CNH','CNY','TRY','BRL','INR','KRW','SEK','NOK','ZAR','EURUSD','USDJPY','GBPUSD','USDCHF','AUDUSD','USDCAD','DXY','USDX']);
 let S=null;
 const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
@@ -123,7 +125,7 @@ async function uniBF(){
     const tradfi=ct.includes('TRADIFI')||ct.includes('TRADFI')||sub.includes('TRADFI')||['COMMODITY','EQUITY','HK_EQUITY','KR_EQUITY','CN_EQUITY','STOCK','FOREX','FX','METAL'].includes(ut);
     if(x.status!=='TRADING'||x.quoteAsset!=='USDT'||!tradfi||!vol[x.symbol]||!(vol[x.symbol][0]>0))return;
     const name=x.baseAsset||x.symbol.replace(/USDT$/,'');
-    let cat=ut==='COMMODITY'||ut==='METAL'||CAT_COM.has(name)?'Materias primas':/EQUITY|STOCK/.test(ut)?'Acciones':(ut==='FOREX'||ut==='FX'||CAT_FX.has(name))?'Divisas':CAT_IDX.has(name)?'Índices':'TradFi';
+    let cat=ut==='COMMODITY'||ut==='METAL'||isCom(name)?'Materias primas':/EQUITY|STOCK/.test(ut)?'Acciones':(ut==='FOREX'||ut==='FX'||CAT_FX.has(name))?'Divisas':CAT_IDX.has(name)?'Índices':'TradFi';
     const sess={HK_EQUITY:'hk',KR_EQUITY:'krx',CN_EQUITY:'shanghai'}[ut];
     const k='BF:'+x.symbol;market.meta[k]={name,cat,vol:vol[x.symbol][0],sess,o24:vol[x.symbol][2]};setPx(k,vol[x.symbol][1]);out.push(k);
   });
@@ -139,7 +141,7 @@ async function uniHL(){
       const c=ctxs[i]||{};if(u.isDelisted)return;
       const id=u.name.includes(':')?u.name:dex+':'+u.name,name=id.split(':')[1],v=+c.dayNtlVlm||0,p=+(c.midPx||c.markPx)||0;
       if(!p||v<20000)return;
-      const cat=CAT_IDX.has(name)?'Índices':CAT_COM.has(name)?'Materias primas':CAT_FX.has(name)?'Divisas':cryptoNames.has(name)?'Cripto':'Acciones';
+      const cat=CAT_IDX.has(name)?'Índices':isCom(name)?'Materias primas':CAT_FX.has(name)?'Divisas':cryptoNames.has(name)?'Cripto':'Acciones';
       if(cat==='Cripto'&&S.settings.markets.BN)return; /* ya la cubre Binance */
       /* Hyperliquid: la cantidad va con szDecimals decimales, el precio con 5 cifras significativas y como mucho 6−szDecimals decimales; orden mínima de $10 */
       const sz=+u.szDecimals||0;market.rules['HL:'+id]={step:Math.pow(10,-sz),minQty:Math.pow(10,-sz),minNot:10,sig:5,maxDec:Math.max(0,6-sz),venue:'Hyperliquid'};

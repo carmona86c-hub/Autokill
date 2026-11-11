@@ -216,7 +216,7 @@ const ibClass=k=>{const c=catOf(k);return c==='Cripto'?'crypto':c==='Divisas'?'f
    Tampoco empresas que no cotizan en EE. UU. (coreanas, chinas, aún sin salir a bolsa). */
 const IB_NOT_US=new Set(['SKHY','SMSN','ANT','UNITREE','OPENAI','XAI','ANTHROPIC','KIOXIA','BYTEDANCE','STRIPE','DATABRICKS']);
 function ibOK(k){const m=metaOf(k)||{},c=catOf(k);if(c==='Cripto')return isMix()?vensOf(k).length>0:IB_CRYPTO.has(base(k));
-  if(c==='Índices'||c==='Materias primas'||c==='TradFi')return false;if(c==='Acciones'&&IB_NOT_US.has(String(base(k)).toUpperCase()))return false;
+  if(c==='Índices'||c==='Materias primas'||c==='TradFi'||isCom(base(k)))return false;if(c==='Acciones'&&IB_NOT_US.has(String(base(k)).toUpperCase()))return false;
   return !['hk','krx','shanghai'].includes(m.sess);}
 const IB_MARGIN=2000;
 const marginOK=()=>S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0)*(isMix()?splitIB():1)>=IB_MARGIN;

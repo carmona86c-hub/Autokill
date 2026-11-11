@@ -458,3 +458,142 @@ function protReport(){
     `\n  pausas: ${pz.length?pz.map(([k,v])=>v.until>now?`${patLab(k)} hasta ${new Date(v.until).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (${v.n} ops, media ${pct(v.m)})`:`${patLab(k)} en prueba`).join(' · '):'ninguna'}`+
     `\n  próximos momentos peligrosos: ${nx||'ninguno en la lista'}`;
 }
+
+/* ---------- laboratorio de señales ----------
+   Cada señal con dirección que ve el agente (entre o no) se guarda en una ficha con todo lo que veía: puntuación, RSI, ruptura, volumen,
+   tendencia en 1 h y en varios días, fuerza frente a su mercado (bitcoin o Nasdaq), eficiencia del movimiento, nerviosismo, hora, día y
+   qué decidió. Después se sigue el precio vela a vela: ¿llegó antes al objetivo o al stop? ¿cuánto llegó a ir a favor y en contra? El
+   resultado se mide en R (veces lo arriesgado) ya restados los costes. Con eso se calcula qué acierta de verdad y, solo con pruebas claras
+   (al menos 40 casos y t ≥ 2,5), actúa: bloquea los tipos de señal que pierden y apaga los filtros que están quitando operaciones buenas. */
+const SIG_MAX=1500,SIG_N=40,SIG_T=2.5;
+/* orden fijo de las características: cada ficha las guarda como lista para ocupar poco */
+const SIG_FK=['lado','mercado','velas','mercado y lado','puntuación','RSI','ruptura','volumen','eficiencia','nerviosismo','volatilidad (ATR %)','tendencia 1 h','últimas 24 h','últimos 5 días','fuerza frente a su mercado (4 h)','fuerza frente a su mercado (24 h)','tendencia de su mercado','hora','día','experiencia'];
+const sigOf=()=>S.sig||(S.sig={list:[],open:[],sum:null,act:{block:{},off:{}},at:0,sumAt:0});
+const ret1h=(k,n)=>{const c=kOf('1h',k);if(!c||c.length<=n)return null;return c[c.length-1].c/c[c.length-1-n].c-1;};
+const refOf=k=>catOf(k)==='Cripto'?uni().find(x=>catOf(x)==='Cripto'&&base(x)==='BTC'):isStk(k)?(ndxC.k||uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(base(x).toUpperCase()))):null;
+const band=(v,cuts,labs)=>{if(v==null||!isFinite(v))return 'sin dato';for(let i=0;i<cuts.length;i++)if(v<cuts[i])return labs[i];return labs[labs.length-1];};
+function sigFeat(a,an,P){
+  const k=an.sym,sh=an.side==='short',d=sh?-1:1,c=kOf(an.tf,k)||[],n=c.length-1,f={};
+  f.lado=sh?'a la baja':'al alza';f.mercado=catOf(k);f.velas=an.tf;f['mercado y lado']=catOf(k)+' '+f.lado;
+  f.puntuación=band(an.score,[60,70,80,90],['<60','60-69','70-79','80-89','90+']);
+  f.RSI=band(sh?100-an.rsi:an.rsi,[45,55,65,75],['<45','45-54','55-64','65-74','75+']);
+  if(n>21){const w=c.slice(n-20,n),hi=Math.max(...w.map(x=>x.h)),lo=Math.min(...w.map(x=>x.l)),va=w.reduce((t,x)=>t+x.v,0)/20;
+    f.ruptura=(sh?c[n].c<lo:c[n].c>hi)?'sí':'no';f.volumen=band(va>0?c[n].v/va:null,[.7,1.3,2],['bajo','normal','alto','muy alto']);}
+  f.eficiencia=band(effOf(c),[.2,.35,.5],['<0,20 (de lado)','0,20-0,34','0,35-0,49','0,50+ (va derecho)']);
+  f.nerviosismo=band(nervOf(c),[.8,1.2,1.8],['tranquilo','normal','movido','nervioso']);
+  f['volatilidad (ATR %)']=band(an.atrPct*100,[.3,.6,1.2,2.5],['<0,3','0,3-0,6','0,6-1,2','1,2-2,5','2,5+']);
+  {const h=analyze(k,P,'1h');f['tendencia 1 h']=!h?'sin dato':(sh?h.short.trend:h.trend)?'a favor':(sh?h.trend:h.short.trend)?'en contra':'sin tendencia';}
+  {const r24=ret1h(k,24),r120=ret1h(k,120);f['últimas 24 h']=band(r24==null?null:d*r24*100,[-2,-.5,.5,2],['muy en contra','en contra','plano','a favor','muy a favor']);
+    f['últimos 5 días']=band(r120==null?null:d*r120*100,[-5,-1,1,5],['muy en contra','en contra','plano','a favor','muy a favor']);}
+  {const rf=refOf(k);if(rf&&rf!==k){const a4=ret1h(k,4),b4=ret1h(rf,4),a24=ret1h(k,24),b24=ret1h(rf,24);
+    f['fuerza frente a su mercado (4 h)']=band(a4==null||b4==null?null:d*(a4-b4)*100,[-1,-.25,.25,1],['mucho más débil','más débil','igual','más fuerte','mucho más fuerte']);
+    f['fuerza frente a su mercado (24 h)']=band(a24==null||b24==null?null:d*(a24-b24)*100,[-2,-.5,.5,2],['mucho más débil','más débil','igual','más fuerte','mucho más fuerte']);}}
+  {const r=catOf(k)==='Cripto'?btcTrend(P):isStk(k)?ndxTrend(P):null;f['tendencia de su mercado']=r==null?'sin dato':(r==='up')===!sh?'a favor':'en contra';}
+  {const t=Date.now();if(isStk(k)){const p=etP(t);f.hora='NY '+band(p.m/60,[10,11,12,13,14,15],['9:30-10','10-11','11-12','12-13','13-14','14-15','15-16']);}
+    else{const hu=new Date(t).getUTCHours();f.hora='UTC '+band(hu,[4,8,12,16,20],['0-4','4-8','8-12','12-16','16-20','20-24']);}
+    f.día=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][new Date(t).getUTCDay()];}
+  {const x=xp(k);f.experiencia=x.e&&x.e.n>=3?(x.adj>0?'buena':x.adj<0?'mala':'neutra'):'sin historial';}
+  return f;
+}
+/* guarda una ficha por activo, velas, dirección y vela (no se repite en la misma vela) */
+function sigRecord(a,an,P,why){
+  if(!an||!an.trend||a.id!==0)return;const G=sigOf(),c=kOf(an.tf,an.sym);if(!c||c.length<60)return;
+  const id=an.sym+'|'+an.tf+'|'+an.side+'|'+c[c.length-1].t;if(G.open.some(x=>x.id===id))return;
+  const sd=P.stopATR*an.atr;if(!(sd>0))return;
+  G.open.push({id,k:an.sym,tf:an.tf,sh:an.side==='short'?1:0,t:Date.now(),e:an.price,sd,tp:P.tpATR*an.atr,cR:costOf(an.sym)*an.price/sd,
+    h:Math.min(P.maxHold||48,48),dec:why?rlab(why):'apta: entra',f:(f=>SIG_FK.map(x=>f[x]??null))(sigFeat(a,an,P))});
+  if(G.open.length>800)G.open.splice(0,G.open.length-800);
+}
+/* sigue cada ficha con las velas de su marco: objetivo o stop (si en la misma vela se tocan los dos, cuenta el stop) */
+function sigResolve(){
+  const G=sigOf(),keep=[];
+  for(const s of G.open){
+    const c=kOf(s.tf,s.k);if(!c){if(Date.now()-s.t>3*864e5)continue;keep.push(s);continue;}
+    const after=c.filter(x=>x.t>s.t);let out=null,mfe=0,mae=0;
+    for(let i=0;i<after.length&&i<s.h;i++){const b=after[i],up=(s.sh?s.e-b.l:b.h-s.e)/s.sd,dn=(s.sh?b.h-s.e:s.e-b.l)/s.sd;
+      mfe=Math.max(mfe,up);mae=Math.max(mae,dn);
+      if(dn>=1){out={r:-1,res:'stop'};break;}if(up*s.sd>=s.tp){out={r:s.tp/s.sd,res:'objetivo'};break;}}
+    if(!out&&after.length>=s.h){const l=after[s.h-1].c;out={r:(s.sh?s.e-l:l-s.e)/s.sd,res:'tiempo'};}
+    if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    G.list.unshift({t:s.t,k:s.k,dec:s.dec,f:s.f,r:+(out.r-s.cR).toFixed(3),res:out.res,mfe:+mfe.toFixed(2),mae:+mae.toFixed(2)});
+  }
+  G.open=keep;if(G.list.length>SIG_MAX)G.list.length=SIG_MAX;
+}
+const mstat=v=>{const n=v.length;if(!n)return {n:0,m:0,t:0,w:0};const m=v.reduce((a,b)=>a+b,0)/n,sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/(n-1)):0;return {n,m,t:sd>0?m/(sd/Math.sqrt(n)):0,w:v.filter(x=>x>0).length/n};};
+/* análisis: para cada característica y cada valor, cuántas señales, cuántas ganaron, R medio y si la diferencia es clara (t) */
+function sigAnalyze(){
+  const G=sigOf(),LA=G.list.filter(x=>Date.now()-x.t<30*864e5),L0=LA.filter(x=>SIG_OK.has(x.dec)),all=mstat(L0.map(x=>x.r)),feats={};
+  for(const s of L0)s.f.forEach((fv,i)=>{if(fv==null)return;const fk=SIG_FK[i],o=(feats[fk]=feats[fk]||{});(o[fv]=o[fv]||[]).push(s.r);});
+  const rows=[];for(const fk in feats)for(const fv in feats[fk]){const st=mstat(feats[fk][fv]);rows.push({f:fk,v:fv,...st,d:st.m-all.m});}
+  const dec={};for(const s of LA)(dec[s.dec]=dec[s.dec]||[]).push(s.r);
+  const decs=Object.entries(dec).map(([k,v])=>({k,...mstat(v)})).sort((x,y)=>y.n-x.n);
+  const clear=rows.filter(r=>r.n>=SIG_N&&Math.abs(r.t)>=SIG_T).sort((x,y)=>y.m-x.m);
+  G.sum={at:Date.now(),n:L0.length,nAll:LA.length,open:G.open.length,all,best:clear.filter(r=>r.m>0).slice(0,8),worst:clear.filter(r=>r.m<0).slice(-8).reverse(),
+    promising:rows.filter(r=>r.n>=15&&r.n<SIG_N&&Math.abs(r.d)>.3).sort((x,y)=>Math.abs(y.d)-Math.abs(x.d)).slice(0,6),decs,act:G.act};
+  return G.sum;
+}
+/* acciones con pruebas claras: bloquear lo que pierde y apagar los filtros que rechazan señales que habrían ganado.
+   Se revisan cada hora y se deshacen solas si la prueba deja de ser clara. */
+/* señales aptas: las que pasaron los filtros de calidad (entró, o no entró solo por falta de hueco o dinero, o por el propio laboratorio).
+   Las que se rechazan por calidad (sin tendencia, sin recorrido para cubrir costes…) no sirven para juzgar: casi siempre pierden. */
+const SIG_OK=new Set(['apta: entra','bloqueado por el laboratorio','límite de posiciones','ya en cartera','demasiadas criptos en la misma dirección','capital insuficiente','efectivo pendiente de liquidar o insuficiente']);
+const SIG_MAXBLOCK=6;
+const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tendencia 1 h','últimos 5 días','fuerza frente a su mercado (24 h)','volatilidad (ATR %)'];
+const SIG_FILTERS=['mercado de lado','contra la tendencia del Nasdaq','primeros 15 min de bolsa','día de noticias'];
+function sigAct(){
+  const G=sigOf(),sm=G.sum;if(!sm)return;const A=G.act,tg=t=>{L(null,'evolve',t);try{tgPost('🔬 Automaton · '+t);}catch(e){}};
+  const rowsBy={},base=sm.all;for(const s of G.list.filter(x=>Date.now()-x.t<30*864e5&&SIG_OK.has(x.dec)))for(const fk of SIG_FEATS_BLOCK){const fv=s.f[SIG_FK.indexOf(fk)];if(fv==null||fv==='sin dato')continue;(rowsBy[fk+'='+fv]=rowsBy[fk+'='+fv]||[]).push(s.r);}
+  /* solo se bloquea lo que pierde de forma clara y además es bastante peor que la media (0,2R); como mucho 6 a la vez, los peores.
+     Si todo pierde, el problema es la estrategia: no se bloquea todo, se informa. */
+  const cand=Object.entries(rowsBy).map(([key,v])=>({key,st:mstat(v)})).filter(x=>x.st.n>=SIG_N&&x.st.m<0&&x.st.t<=-SIG_T&&x.st.m<base.m-.2).sort((x,y)=>x.st.m-y.st.m).slice(0,SIG_MAXBLOCK),worst=new Set(cand.map(x=>x.key));
+  for(const key in rowsBy){const st=mstat(rowsBy[key]);const bad=worst.has(key);
+    if(bad&&!A.block[key]&&Object.keys(A.block).length<SIG_MAXBLOCK){A.block[key]={at:Date.now(),n:st.n,m:st.m};tg(`Laboratorio: bloquea las señales con ${key.replace('=',' = ')}. En ${st.n} casos dieron ${st.m.toFixed(2)}R de media (ganaron ${Math.round(st.w*100)} %): pierden de forma clara.`);}
+    else if(!bad&&A.block[key]&&(st.n<SIG_N||st.t>-1.5||st.m>=base.m-.1)){delete A.block[key];tg(`Laboratorio: vuelve a permitir ${key.replace('=',' = ')} (la prueba ya no es clara: ${st.n} casos, ${st.m.toFixed(2)}R).`);}}
+  for(const d of sm.decs){if(!SIG_FILTERS.includes(d.k))continue;const good=d.n>=SIG_N&&d.m>0&&d.t>=SIG_T;
+    if(good&&!A.off[d.k]){A.off[d.k]={at:Date.now(),n:d.n,m:d.m};tg(`Laboratorio: apaga el filtro «${d.k}». Rechazó ${d.n} señales que habrían dado ${d.m.toFixed(2)}R de media: estaba quitando operaciones buenas.`);}
+    else if(!good&&A.off[d.k]&&d.n>=SIG_N&&d.t<1)delete A.off[d.k];}
+}
+function sigTick(){const G=sigOf(),now=Date.now();if(now-G.at<5*60e3)return;G.at=now;sigResolve();if(now-G.sumAt>=3600e3||!G.sum){G.sumAt=now;sigAnalyze();sigAct();}}
+const sigBlocked=(f,A)=>{for(const key in A.block){const i=key.indexOf('=');if(f[key.slice(0,i)]===key.slice(i+1))return key.replace('=',' = ');}return null;};
+{const d1=decide;decide=function(a,an,P,T,pre){
+  let w=d1(a,an,P,T,pre);
+  if(w&&a.id===0){const lab=rlab(w),A=sigOf().act;if(A.off[lab]&&SIG_FILTERS.includes(lab)&&w===protGuardLast){w=null;}}
+  if(!w&&a.id===0&&an.trend){const f=sigFeat(a,an,P),b=sigBlocked(f,sigOf().act);if(b)w=`el laboratorio lo bloquea: las señales con ${b} pierden de forma clara`;}
+  if(!pre)try{sigRecord(a,an,P,w);sigTick();}catch(e){}
+  return w;};}
+/* para poder apagar un filtro, se recuerda el último motivo que dio la protección */
+let protGuardLast=null;{const g0=protGuard;protGuard=function(a,an,P){const r=g0(a,an,P);protGuardLast=r;if(r&&a.id===0){const lab=rlab(r),A=(S.sig||{}).act;if(A&&A.off[lab])return null;}return r;};}
+RLAB.unshift(['laboratorio','bloqueado por el laboratorio']);
+function sigReport(){
+  const sm=(S.sig||{}).sum;if(!sm)return '\nLABORATORIO DE SEÑALES: reuniendo datos (las primeras conclusiones salen tras unas horas)';
+  const f=r=>`${r.f} = ${r.v}: ${r.n} casos, ${Math.round(r.w*100)} % ganan, ${r.m>=0?'+':''}${r.m.toFixed(2)}R (t ${r.t.toFixed(1)})`;
+  const A=sm.act||{block:{},off:{}};
+  return `\nLABORATORIO DE SEÑALES (${sm.nAll||sm.n} señales seguidas en 30 días, ${sm.n} aptas, ${sm.open} en seguimiento) · media de las aptas: ${sm.all.m>=0?'+':''}${sm.all.m.toFixed(2)}R, ganan ${Math.round(sm.all.w*100)} %`+
+    `\n  lo que gana de forma clara:\n${sm.best.map(r=>'    '+f(r)).join('\n')||'    aún nada claro'}`+
+    `\n  lo que pierde de forma clara:\n${sm.worst.map(r=>'    '+f(r)).join('\n')||'    aún nada claro'}`+
+    `\n  prometedor (pocos casos aún):\n${sm.promising.map(r=>'    '+f(r)).join('\n')||'    —'}`+
+    `\n  por decisión (qué habría pasado con las señales que se rechazaron):\n${sm.decs.slice(0,10).map(d=>`    ${d.k}: ${d.n} señales, ${Math.round(d.w*100)} % habrían ganado, ${d.m>=0?'+':''}${d.m.toFixed(2)}R`).join('\n')}`+
+    `\n  acciones automáticas: ${[...Object.keys(A.block).map(k=>'bloquea '+k.replace('=',' = ')),...Object.keys(A.off).map(k=>'filtro apagado: '+k)].join(' · ')||'ninguna (hacen falta 40 casos y una diferencia clara)'}`;
+}
+{const p0=protReport;protReport=function(){return p0()+sigReport();};}
+/* tarjeta «Laboratorio de señales» en Estadísticas y estado ligero para los dispositivos que miran el servidor */
+function sigCard(){
+  if(typeof document==='undefined'||!document.getElementById)return;const host=document.getElementById('s-stats');if(!host||!host.insertBefore)return;
+  let box=document.getElementById('sigCard');if(!box){box=document.createElement('div');box.className='card';box.id='sigCard';const ref=document.getElementById('routeCard')||document.getElementById('trades');if(ref&&ref.parentNode===host)host.insertBefore(box,ref.closest?ref:ref);else host.appendChild(box);}
+  const sm=(S.sig||{}).sum,row=r=>`<tr><td>${esc(r.f)}</td><td>${esc(r.v)}</td><td>${r.n}</td><td>${Math.round(r.w*100)} %</td><td class="${r.m>=0?'up':'down'}">${r.m>=0?'+':''}${r.m.toFixed(2)}R</td></tr>`;
+  if(!sm){box.innerHTML='<h2>Laboratorio de señales</h2><p class="note" style="margin:0">Reuniendo datos: guarda cada señal que ve el agente (entre o no) y sigue qué pasa después. Las primeras conclusiones salen tras unas horas; las fiables, tras unos días.</p>';return;}
+  const A=sm.act||{block:{},off:{}},acts=[...Object.keys(A.block).map(k=>'Bloquea: '+k.replace('=',' = ')),...Object.keys(A.off).map(k=>'Filtro apagado: '+k)];
+  const th='<tr><th>Característica</th><th>Valor</th><th>Casos</th><th>Ganan</th><th>R medio</th></tr>';
+  box.innerHTML=`<h2>Laboratorio de señales</h2><p class="note" style="margin:0 0 8px">${sm.nAll||sm.n} señales seguidas en 30 días, ${sm.n} aptas (pasaron los filtros de calidad), ${sm.open} en seguimiento. Las aptas dan de media <b class="${sm.all.m>=0?'up':'down'}">${sm.all.m>=0?'+':''}${sm.all.m.toFixed(2)}R</b> y ganan un ${Math.round(sm.all.w*100)} %. R = veces lo arriesgado, ya restados los costes. «Claro» = al menos ${SIG_N} casos y diferencia que no es casualidad.</p>
+  <div class="lbl">Gana de forma clara</div><div class="tw">${sm.best.length?`<table>${th}${sm.best.map(row).join('')}</table>`:'<p class="note">Aún nada claro.</p>'}</div>
+  <div class="lbl" style="margin-top:8px">Pierde de forma clara</div><div class="tw">${sm.worst.length?`<table>${th}${sm.worst.map(row).join('')}</table>`:'<p class="note">Aún nada claro.</p>'}</div>
+  ${sm.promising.length?`<div class="lbl" style="margin-top:8px">Prometedor (pocos casos aún)</div><div class="tw"><table>${th}${sm.promising.map(row).join('')}</table></div>`:''}
+  <div class="lbl" style="margin-top:8px">Qué habría pasado con cada decisión</div><div class="tw"><table><tr><th>Decisión</th><th>Señales</th><th>Habrían ganado</th><th>R medio</th></tr>${sm.decs.slice(0,10).map(d=>`<tr><td>${esc(d.k)}</td><td>${d.n}</td><td>${Math.round(d.w*100)} %</td><td class="${d.m>=0?'up':'down'}">${d.m>=0?'+':''}${d.m.toFixed(2)}R</td></tr>`).join('')}</table></div>
+  <p class="note" style="margin:8px 0 0"><b>Acciones automáticas:</b> ${acts.length?acts.map(esc).join(' · '):'ninguna todavía (solo actúa con pruebas claras)'}.</p>`;
+}
+function sigLate(){
+  if(typeof renderStats==='function'&&!renderStats.__sig){const r0=renderStats;renderStats=function(){r0.apply(this,arguments);try{sigCard();}catch(e){}};renderStats.__sig=1;}
+  if(typeof exportView==='function'&&!exportView.__sig){const e0=exportView;exportView=function(){const G=S.sig;if(G)S.sig={sum:G.sum,act:G.act};try{return e0.apply(this,arguments);}finally{if(G)S.sig=G;}};exportView.__sig=1;}
+}
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('DOMContentLoaded',sigLate);
+{const s0=sigTick;sigTick=function(){sigLate();return s0();};}

@@ -292,7 +292,7 @@ $('rView').addEventListener('click',async()=>{
 });
 $('rOff').addEventListener('click',async()=>{
   REM.on=false;remSave();remErr=null;S=await loadState();market.universe=[];market.uniAt=0;market.src={BN:{},BF:{},HL:{}};market.price={};ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;
-  $('capIn').value=S.initial;$('stAgent').innerHTML='';buildSettings();renderRem('Vuelves a usar el agente de este dispositivo. Ojo: si el del servidor sigue activo, ahora tienes dos agentes distintos.');tick(true);
+  $('capIn').value=S.initial;$('stAgent').innerHTML='';buildSettings();LOC.at=0;LOC.on=null;renderRem('Vuelves a usar el agente de este dispositivo. Si el del servidor sigue funcionando, este dispositivo no operará por su cuenta (para no tener dos agentes con el mismo dinero); solo lo hará si el servidor deja de responder.');tick(true);
 });
 $('kTest').addEventListener('click',async()=>{
   const u=cleanUrl($('kUrl').value),m=$('kMsg');$('kUrl').value=u;

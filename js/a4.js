@@ -8,11 +8,24 @@ function reportErr(e){
   if(Date.now()-errAt<600000)return;errAt=Date.now();
   L(null,'info',`Error interno: ${(e&&e.message)||e}. La app sigue funcionando; si se repite, copia el informe (Estadísticas) y mándamelo.`);
 }
+/* un solo agente: si el servidor 24/7 está funcionando, este dispositivo no opera por su cuenta (serían dos agentes distintos
+   comprando con el mismo dinero). Se comprueba cada 5 min; si el servidor no responde, este dispositivo sigue como siempre. */
+const LOC={at:0,on:null,busy:false};
+function srvLive(){
+  if(IS_SERVER||REM.on||!REM.url)return false;const n=Date.now();
+  if(!LOC.busy&&n-LOC.at>5*60e3){LOC.busy=true;LOC.at=n;
+    fget(cleanUrl(REM.url)+'/agent/health').then(j=>{const was=LOC.on;LOC.on=!!(j&&j.ready);
+      if(LOC.on&&!was)L(null,'info','El agente del servidor 24/7 está funcionando: este dispositivo deja de operar por su cuenta para no tener dos agentes con el mismo dinero. Para verlo y controlarlo: Ajustes → «Ver el del servidor».');
+      if(!LOC.on&&was)L(null,'info','El servidor 24/7 no responde: este dispositivo vuelve a operar por su cuenta mientras tanto.');})
+      .catch(()=>{if(LOC.on)L(null,'info','El servidor 24/7 no responde: este dispositivo vuelve a operar por su cuenta mientras tanto.');LOC.on=false;}).finally(()=>{LOC.busy=false;});}
+  return LOC.on!==false; /* mientras llega la primera respuesta, tampoco opera */
+}
 async function tick(manual){
   if(busy)return;busy=true;
   if(REM.on){try{await pullRemote();}catch(e){}finally{busy=false;render();schedule();}return;}
   try{
-    const now=Date.now(),act=S.running&&alive().length>0;
+    const now=Date.now(),live=srvLive(),act=S.running&&alive().length>0&&!live;
+    if(live){ui.summary='El agente del servidor 24/7 está funcionando: este dispositivo no opera por su cuenta (Ajustes → «Ver el del servidor»). Los stops de lo que tenga abierto aquí se siguen vigilando.';ui.reasons='';}
     if(act&&now-S.lastSeen>120000)L(null,'pause',`Pausa de ${Math.round((now-S.lastSeen)/60000)} min (app cerrada o en segundo plano): no se operó. Todo lo aprendido y las posiciones siguen guardados; ahora se revisan con el precio actual.`);
     if(!market.universe.length||now-market.uniAt>30*60e3)await loadUniverse();else await pollPrices();
     if(!market.universe.length){market.err='sin mercados';throw new Error('sin mercados');}

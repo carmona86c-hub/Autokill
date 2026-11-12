@@ -413,7 +413,9 @@ function ndxTrend(P){if(Date.now()-ndxC.at<60000)return ndxC.v;const k=uni().fin
 /* pausa de lo que no funciona: tipo de operación = mercado + dirección + velas. Si en sus últimas operaciones (al menos 8) pierde de forma clara
    (media negativa y t < −1,5: no es mala suerte), se pausa 48 h; luego vuelve a prueba con la mitad de riesgo. Si en 5 operaciones de prueba
    sigue perdiendo, se pausa el doble (hasta 14 días); si no, queda reactivado y se juzga solo con lo que haga desde entonces. */
-const patKey=x=>catOf(x.sym)+'|'+(x.side||'long')+'|'+(x.tf||'?');
+/* las acciones de Binance (bStocks) son su propio grupo: no se mezclan con las criptos al juzgar qué tipo de operación pierde */
+const grpOf=k=>isBS(k)?'Acción tokenizada':catOf(k);
+const patKey=x=>grpOf(x.sym)+'|'+(x.side||'long')+'|'+(x.tf||'?');
 const patLab=k=>{const [c,s,t]=k.split('|');return `${c} ${s==='short'?'a la baja':'al alza'} con velas de ${t}`;};
 let patAt=0;
 function patCheck(force){
@@ -434,13 +436,19 @@ function patCheck(force){
   }
 }
 function protGuard(a,an,P){
-  const k=an.sym,sh=an.side==='short',now=Date.now();patCheck();
+  const k=an.sym,sh=an.side==='short',now=Date.now();
+  if(!S.settings.pauseV2){S.settings.pauseV2=1;if(S.pause)for(const x in S.pause)if(x.startsWith('Cripto|'))delete S.pause[x];patAt=0;L(null,'info','Las pausas por tipo de operación se recalculan separando las acciones de Binance de las criptos.');}
+  patCheck();
   const st=(S.pause||{})[patKey(an)];
   if(st&&st.until>now)return `tipo de operación en pausa (${patLab(patKey(an))}): pierde de forma clara, se reintenta ${new Date(st.until).toLocaleString('es-ES',{weekday:'short',hour:'2-digit',minute:'2-digit'})}`;
   const ev=evNow(k,now);if(ev)return 'momento peligroso: '+ev;
   if(isStk(k)&&sessOf(k)==='us'){const p=etP(now);if(p.m<585)return 'apertura de la bolsa: primeros 15 min, precios erráticos';
     const g=gapOf(k);if(g!=null&&Math.abs(g)>.04)return `día de noticias: abrió con un salto del ${pct(g,1)} (resultados u otra noticia)`;
     if(catOf(k)==='Acciones'){const nd=ndxTrend(P);if(nd&&((sh&&nd==='up')||(!sh&&nd==='down')))return `contra la tendencia del Nasdaq (${nd==='up'?'alcista':'bajista'})`;}}
+  /* acciones de Binance: la acción de verdad abre a las 9:30 de Nueva York y en los 30 min de antes y los 15 de después el precio pega saltos */
+  if(isBS(k)){const p=etP(now);if((sessOpen('us',now+30*60e3)&&!sessOpen('us',now))||(sessOpen('us',now)&&p.m<585))return 'apertura de la bolsa de EE. UU.: de 30 min antes a 15 min después, precios erráticos';
+    const u=uni().find(x=>srcOf(x)!=='BN'&&String(base(x)).toUpperCase()===ubase(k));const g=u?gapOf(u):null;
+    if(sessOpen('us',now)&&g!=null&&Math.abs(g)>.04)return `día de noticias: la acción abrió con un salto del ${pct(g,1)} (resultados u otra noticia)`;}
   if(isBS(k)){const nd=ndxTrend(P);if(nd&&((sh&&nd==='up')||(!sh&&nd==='down')))return `contra la tendencia del Nasdaq (${nd==='up'?'alcista':'bajista'})`;}
   const c=kOf(an.tf,k),e=effOf(c);if(e!=null&&e<.2)return `mercado de lado: en las últimas 20 velas de ${an.tf} se mueve sin dirección clara (eficiencia ${Math.round(e*100)} %)`;
   const nv=nervOf(c);an.nerv=nv!=null&&nv>1.8?nv:0;an.prob=!!(st&&st.prob);
@@ -475,7 +483,7 @@ const refOf=k=>catOf(k)==='Cripto'&&!isBS(k)?uni().find(x=>catOf(x)==='Cripto'&&
 const band=(v,cuts,labs)=>{if(v==null||!isFinite(v))return 'sin dato';for(let i=0;i<cuts.length;i++)if(v<cuts[i])return labs[i];return labs[labs.length-1];};
 function sigFeat(a,an,P){
   const k=an.sym,sh=an.side==='short',d=sh?-1:1,c=kOf(an.tf,k)||[],n=c.length-1,f={};
-  f.lado=sh?'a la baja':'al alza';f.mercado=catOf(k);f.velas=an.tf;f['mercado y lado']=catOf(k)+' '+f.lado;
+  f.lado=sh?'a la baja':'al alza';f.mercado=grpOf(k);f.velas=an.tf;f['mercado y lado']=grpOf(k)+' '+f.lado;
   f.puntuación=band(an.score,[60,70,80,90],['<60','60-69','70-79','80-89','90+']);
   f.RSI=band(sh?100-an.rsi:an.rsi,[45,55,65,75],['<45','45-54','55-64','65-74','75+']);
   if(n>21){const w=c.slice(n-20,n),hi=Math.max(...w.map(x=>x.h)),lo=Math.min(...w.map(x=>x.l)),va=w.reduce((t,x)=>t+x.v,0)/20;
@@ -503,7 +511,7 @@ function sigRecord(a,an,P,why){
   const sd=P.stopATR*an.atr;if(!(sd>0))return;
   G.open.push({id,k:an.sym,tf:an.tf,sh:an.side==='short'?1:0,t:Date.now(),e:an.price,sd,tp:P.tpATR*an.atr,cR:costOf(an.sym)*an.price/sd,
     h:Math.min(P.maxHold||48,48),dec:why?rlab(why):'apta: entra',f:(f=>SIG_FK.map(x=>f[x]??null))(sigFeat(a,an,P))});
-  if(G.open.length>800)G.open.splice(0,G.open.length-800);
+  if(G.open.length>800){let drop=G.open.length-800;G.open=G.open.filter(x=>drop<=0||SIG_OK.has(x.dec)||(drop--,false));if(G.open.length>800)G.open.splice(0,G.open.length-800);}
 }
 /* sigue cada ficha con las velas de su marco: objetivo o stop (si en la misma vela se tocan los dos, cuenta el stop) */
 function sigResolve(){
@@ -518,8 +526,12 @@ function sigResolve(){
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
     G.list.unshift({t:s.t,k:s.k,dec:s.dec,f:s.f,r:+(out.r-s.cR).toFixed(3),res:out.res,mfe:+mfe.toFixed(2),mae:+mae.toFixed(2)});
   }
-  G.open=keep;if(G.list.length>SIG_MAX)G.list.length=SIG_MAX;
+  G.open=keep;sigTrim(G);
 }
+/* las señales rechazadas por calidad (puntuación baja, sin recorrido…) son muchísimas y casi no sirven para juzgar:
+   se guardan como mucho 400; las aptas, que son las que cuentan, hasta 1.500. Así no se pierden por falta de sitio. */
+const SIG_JUNK=400;
+function sigTrim(G){let junk=0;G.list=G.list.filter(x=>SIG_OK.has(x.dec)||++junk<=SIG_JUNK);if(G.list.length>SIG_MAX)G.list.length=SIG_MAX;}
 const mstat=v=>{const n=v.length;if(!n)return {n:0,m:0,t:0,w:0};const m=v.reduce((a,b)=>a+b,0)/n,sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/(n-1)):0;return {n,m,t:sd>0?m/(sd/Math.sqrt(n)):0,w:v.filter(x=>x>0).length/n};};
 /* análisis: para cada característica y cada valor, cuántas señales, cuántas ganaron, R medio y si la diferencia es clara (t) */
 function sigAnalyze(){
@@ -549,7 +561,7 @@ function sigAct(){
   const cand=Object.entries(rowsBy).map(([key,v])=>({key,st:mstat(v)})).filter(x=>x.st.n>=SIG_N&&x.st.m<0&&x.st.t<=-SIG_T&&x.st.m<base.m-.2).sort((x,y)=>x.st.m-y.st.m).slice(0,SIG_MAXBLOCK),worst=new Set(cand.map(x=>x.key));
   for(const key in rowsBy){const st=mstat(rowsBy[key]);const bad=worst.has(key);
     if(bad&&!A.block[key]&&Object.keys(A.block).length<SIG_MAXBLOCK){A.block[key]={at:Date.now(),n:st.n,m:st.m};tg(`Laboratorio: bloquea las señales con ${key.replace('=',' = ')}. En ${st.n} casos dieron ${st.m.toFixed(2)}R de media (ganaron ${Math.round(st.w*100)} %): pierden de forma clara.`);}
-    else if(!bad&&A.block[key]&&(st.n<SIG_N||st.t>-1.5||st.m>=base.m-.1)){delete A.block[key];tg(`Laboratorio: vuelve a permitir ${key.replace('=',' = ')} (la prueba ya no es clara: ${st.n} casos, ${st.m.toFixed(2)}R).`);}}
+    else if(!bad&&A.block[key]&&st.n>=SIG_N&&(st.t>-1.5||st.m>=base.m-.1)){ /* se desbloquea con pruebas, no por quedarse sin datos */delete A.block[key];tg(`Laboratorio: vuelve a permitir ${key.replace('=',' = ')} (la prueba ya no es clara: ${st.n} casos, ${st.m.toFixed(2)}R).`);}}
   for(const d of sm.decs){if(!SIG_FILTERS.includes(d.k))continue;const good=d.n>=SIG_N&&d.m>0&&d.t>=SIG_T;
     if(good&&!A.off[d.k]){A.off[d.k]={at:Date.now(),n:d.n,m:d.m};tg(`Laboratorio: apaga el filtro «${d.k}». Rechazó ${d.n} señales que habrían dado ${d.m.toFixed(2)}R de media: estaba quitando operaciones buenas.`);}
     else if(!good&&A.off[d.k]&&d.n>=SIG_N&&d.t<1)delete A.off[d.k];}

@@ -561,16 +561,21 @@ const SIG_OK=new Set(['apta: entra','bloqueado por el laboratorio','límite de p
 const SIG_MAXBLOCK=6;
 const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tendencia 1 h','últimos 5 días','fuerza frente a su mercado (24 h)','volatilidad (ATR %)'];
 const SIG_FILTERS=['mercado de lado','contra la tendencia del Nasdaq','primeros 15 min de bolsa','día de noticias'];
+/* las señales de un mismo rato se parecen mucho entre sí: 100 señales de una tarde de caídas no son 100 pruebas independientes.
+   Para actuar, los casos tienen que venir de al menos 3 días distintos y ningún día puede aportar más de la mitad. */
+function sigSpread(v){const c={};for(const x of v){const d=new Date(x.t).toISOString().slice(0,10);c[d]=(c[d]||0)+1;}const days=Object.keys(c).length,mx=v.length?Math.max(...Object.values(c))/v.length:1;return {days,maxShare:mx,ok:days>=3&&mx<=.5};}
 function sigAct(){
   const G=sigOf(),sm=G.sum;if(!sm)return;const A=G.act,tg=t=>{L(null,'evolve',t);try{tgPost('🔬 Automaton · '+t);}catch(e){}};
-  const rowsBy={},base=sm.all;for(const s of G.list.filter(x=>x.v===2&&Date.now()-x.t<30*864e5&&SIG_OK.has(x.dec))) /* solo las medidas con las reglas de venta del bot */for(const fk of SIG_FEATS_BLOCK){const fv=s.f[SIG_FK.indexOf(fk)];if(fv==null||fv==='sin dato')continue;(rowsBy[fk+'='+fv]=rowsBy[fk+'='+fv]||[]).push(s.r);}
+  const rowsBy={},base=sm.all;for(const s of G.list.filter(x=>x.v===2&&Date.now()-x.t<30*864e5&&SIG_OK.has(x.dec))) /* solo las medidas con las reglas de venta del bot */for(const fk of SIG_FEATS_BLOCK){const fv=s.f[SIG_FK.indexOf(fk)];if(fv==null||fv==='sin dato')continue;(rowsBy[fk+'='+fv]=rowsBy[fk+'='+fv]||[]).push(s);}
   /* solo se bloquea lo que pierde de forma clara y además es bastante peor que la media (0,2R); como mucho 6 a la vez, los peores.
      Si todo pierde, el problema es la estrategia: no se bloquea todo, se informa. */
-  const cand=Object.entries(rowsBy).map(([key,v])=>({key,st:mstat(v)})).filter(x=>x.st.n>=SIG_N&&x.st.m<0&&x.st.t<=-SIG_T&&x.st.m<base.m-.2).sort((x,y)=>x.st.m-y.st.m).slice(0,SIG_MAXBLOCK),worst=new Set(cand.map(x=>x.key));
-  for(const key in rowsBy){const st=mstat(rowsBy[key]);const bad=worst.has(key);
+  const cand=Object.entries(rowsBy).map(([key,v])=>({key,st:mstat(v.map(x=>x.r)),sp:sigSpread(v)})).filter(x=>x.sp.ok&&x.st.n>=SIG_N&&x.st.m<0&&x.st.t<=-SIG_T&&x.st.m<base.m-.2).sort((x,y)=>x.st.m-y.st.m).slice(0,SIG_MAXBLOCK),worst=new Set(cand.map(x=>x.key));
+  for(const key in A.block)if(!rowsBy[key]||!sigSpread(rowsBy[key]).ok){delete A.block[key];tg(`Laboratorio: vuelve a permitir ${key.replace('=',' = ')}: la prueba salía de muy pocos días y podía ser cosa de un mal día del mercado.`);}
+  for(const key in rowsBy){const st=mstat(rowsBy[key].map(x=>x.r));const bad=worst.has(key);
     if(bad&&!A.block[key]&&Object.keys(A.block).length<SIG_MAXBLOCK){A.block[key]={at:Date.now(),n:st.n,m:st.m};tg(`Laboratorio: bloquea las señales con ${key.replace('=',' = ')}. En ${st.n} casos dieron ${st.m.toFixed(2)}R de media (ganaron ${Math.round(st.w*100)} %): pierden de forma clara.`);}
     else if(!bad&&A.block[key]&&st.n>=SIG_N&&(st.t>-1.5||st.m>=base.m-.1)){ /* se desbloquea con pruebas, no por quedarse sin datos */delete A.block[key];tg(`Laboratorio: vuelve a permitir ${key.replace('=',' = ')} (la prueba ya no es clara: ${st.n} casos, ${st.m.toFixed(2)}R).`);}}
-  for(const d of sm.decs){if(!SIG_FILTERS.includes(d.k))continue;const good=d.n>=SIG_N&&d.m>0&&d.t>=SIG_T;
+  const byDec={};for(const x of G.list)if(x.v===2&&Date.now()-x.t<30*864e5)(byDec[x.dec]=byDec[x.dec]||[]).push(x);
+  for(const d of sm.decs){if(!SIG_FILTERS.includes(d.k))continue;const good=d.n>=SIG_N&&d.m>0&&d.t>=SIG_T&&sigSpread(byDec[d.k]||[]).ok;
     if(good&&!A.off[d.k]){A.off[d.k]={at:Date.now(),n:d.n,m:d.m};tg(`Laboratorio: apaga el filtro «${d.k}». Rechazó ${d.n} señales que habrían dado ${d.m.toFixed(2)}R de media: estaba quitando operaciones buenas.`);}
     else if(!good&&A.off[d.k]&&d.n>=SIG_N&&d.t<1)delete A.off[d.k];}
 }
@@ -610,7 +615,7 @@ function sigCard(){
   <div class="lbl" style="margin-top:8px">Pierde de forma clara</div><div class="tw">${sm.worst.length?`<table>${th}${sm.worst.map(row).join('')}</table>`:'<p class="note">Aún nada claro.</p>'}</div>
   ${sm.promising.length?`<div class="lbl" style="margin-top:8px">Prometedor (pocos casos aún)</div><div class="tw"><table>${th}${sm.promising.map(row).join('')}</table></div>`:''}
   <div class="lbl" style="margin-top:8px">Qué habría pasado con cada decisión</div><div class="tw"><table><tr><th>Decisión</th><th>Señales</th><th>Habrían ganado</th><th>R medio</th></tr>${sm.decs.slice(0,10).map(d=>`<tr><td>${esc(d.k)}</td><td>${d.n}</td><td>${Math.round(d.w*100)} %</td><td class="${d.m>=0?'up':'down'}">${d.m>=0?'+':''}${d.m.toFixed(2)}R</td></tr>`).join('')}</table></div>
-  <p class="note" style="margin:8px 0 0"><b>Acciones automáticas:</b> ${acts.length?acts.map(esc).join(' · '):'ninguna todavía (solo actúa con pruebas claras)'}.</p>`;
+  <p class="note" style="margin:8px 0 0"><b>Acciones automáticas:</b> ${acts.length?acts.map(esc).join(' · '):'ninguna todavía (solo actúa con pruebas claras y de al menos 3 días distintos)'}.</p>`;
 }
 function sigLate(){
   if(typeof renderStats==='function'&&!renderStats.__sig){const r0=renderStats;renderStats=function(){r0.apply(this,arguments);try{sigCard();}catch(e){}};renderStats.__sig=1;renderStats.__bm=r0.__bm;}

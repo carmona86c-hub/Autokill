@@ -130,6 +130,7 @@ function renderMode(){
     <div class="pre">${[.05,.1,.15,.2,.5,1].map(v=>`<button class="btn" type="button" data-v="${v}">${c2(v)}</button>`).join('')}</div>
     <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual. Lo que gane por encima de su capital (${money(S.agents[0].initial)}) pasa a la cartera reservada, congelada.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
     '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
+    ${lim?'':`<label class="note" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 2px;cursor:pointer"><input type="checkbox" id="keepIn" ${S.settings.keepProfit?'checked':''} style="margin-top:3px"><span><b>Apartar el beneficio</b> también en Automático: lo que gane por encima de su capital (${money(S.agents[0].initial)}) se aparta y no se usa para operar. En real: en Binance pasa a tu cartera Funding; en IBKR se queda en la cuenta sin tocar.</span></label>`}
     ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total. <button class="btn" type="button" data-unv="1" style="padding:4px 10px;margin-left:4px">Liberar</button></div>`:''}
     ${(()=>{const cs=S.capStudy;if(!cs)return '<div class="lab"><div class="lbl">Estudio de variantes</div><div class="note">En cuanto haya velas suficientes, la app probará varios límites sobre el mercado real reciente y te dirá cuál habría funcionado mejor.</div></div>';
       const real=v=>{const x=labSum('limit',v);return x.n?`${x.n} · ${sgn(x.pnl)}`:'—';};
@@ -152,7 +153,7 @@ $('modeDrop').addEventListener('click',async e=>{
   if(b.dataset.v)return setCap(+b.dataset.v);
   if(b.dataset.d){const i=$('capIn2'),cur=parseFloat(String(i&&i.value||'').replace(',','.'))||capV()||.1;setCap(Math.max(.01,Math.round((cur+(+b.dataset.d)*.01)*100)/100));}
 });
-$('modeDrop').addEventListener('change',e=>{if(e.target.id!=='capIn2')return;const v=parseFloat(String(e.target.value).replace(',','.'));e.target.blur();if(v>0)setCap(v);else renderMode();});
+$('modeDrop').addEventListener('change',e=>{if(e.target.id==='keepIn'){act('keep',{on:e.target.checked}).then(()=>renderMode());return;}if(e.target.id!=='capIn2')return;const v=parseFloat(String(e.target.value).replace(',','.'));e.target.blur();if(v>0)setCap(v);else renderMode();});
 $('modeDrop').addEventListener('keydown',e=>{if(e.target.id==='capIn2'&&e.key==='Enter')e.target.blur();});
 function renderPanel(){
   const items=[];S.agents.forEach(a=>a.positions.forEach(p=>items.push([a,p])));

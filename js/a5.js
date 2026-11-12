@@ -62,9 +62,13 @@ function applyCmd(c,a){
       if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
       S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Lo que gane por encima de su capital pasa a la cartera reservada (congelada). Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan. Lo ya reservado sigue congelado.');
       S.agents.forEach(checkExits);S.agents.forEach(sweep);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
+    case 'keep':{S.settings.keepProfit=!!a.on;L(null,'info',a.on?'Apartar el beneficio: activado también en Automático. Lo que el agente gane por encima de su capital se aparta y no se usa para operar.':'Apartar el beneficio: desactivado en Automático. El agente reinvierte lo que gana.');return ok(a.on?'Se apartará el beneficio.':'Se reinvertirá el beneficio.');}
     case 'unvault':{const ag=S.agents[0],v=ag&&ag.vault||0;if(!(v>=.01))return no('No hay nada en la cartera reservada.');
       const x=a.amt==null?v:Math.min(v,Math.round(+a.amt*100)/100);if(!(x>=.01))return no('Pon una cantidad válida.');
-      ag.vault=v-x<.005?0:v-x;moveIn(ag,x);ag.released=(ag.released||0)+x;
+      ag.vault=v-x<.005?0:v-x;
+      /* vuelve a la cartera de operar de cada bróker en proporción a lo que había apartado en cada uno */
+      {const V=ag.vaultV||{},tot=Object.values(V).reduce((t,y)=>t+y,0)||1;for(const w in V){const part=x*V[w]/tot;if(part>0){V[w]=Math.max(0,V[w]-part);if(isMix())vrOf(ag)[w]=(vrOf(ag)[w]||0)+part;if(part>=.005)logVault(ag,w,part,false);}}}
+      moveIn(ag,x);ag.released=(ag.released||0)+x;
       L(ag,'reserve',`Liberado de la cartera reservada: ${money(x)} vuelven al capital del agente (capital ahora ${money(ag.initial)}${ag.vault>=.005?', quedan reservados '+money(ag.vault):''}). Tu patrimonio total no cambia.`);
       return ok('Liberados '+money(x)+'. El agente ya opera con '+money(ag.initial)+'.');}
     case 'split':{if(!isMix())return no('El reparto solo se usa con el bróker «IBKR + Binance».');const v=Math.round(+a.share*100)/100;if(!(v>=0&&v<=1))return no('Pon un porcentaje entre 0 y 100.');

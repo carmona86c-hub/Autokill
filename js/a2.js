@@ -333,11 +333,34 @@ function kill(a,why){
 }
 /* cartera reservada: solo con tu límite de ganancia puesto. Lo que el agente original tenga por encima de su capital
    pasa, en efectivo, a una cartera aparte y congelada; el agente sigue operando con su capital. En automático no se aparta nada. */
+/* apartar el beneficio: lo que pase del capital del agente se aparta y no se usa para operar.
+   Pasa con el modo límite y, si lo activas, también en Automático. En real se hace igual:
+   - Binance: se pasa de la cartera de operar (Spot) a la cartera Funding con su API (transferencia interna, sin retirar nada).
+   - IBKR: su API no mueve dinero; se queda en la cuenta y la app no lo usa. Para sacarlo, retirada a mano desde IBKR. */
+const venOfVault=()=>isMix()?['BN','IB']:[isIB()?'IB':'EX'];
 function sweep(a){
-  if(a.parentId!=null||!(S.settings.capNet>0))return;
+  if(a.parentId!=null||!(S.settings.capNet>0||S.settings.keepProfit))return;
   const x=Math.min(freeCash(a),eq(a)-a.initial);
-  if(x>=.005){a.cash-=x;a.vault=(a.vault||0)+x;a._vq=(a._vq||0)+x;}
-  if(a._vq>=.005&&Date.now()-(a._vt||0)>600000){L(a,'reserve',`A la cartera reservada: +${money(a._vq)} de beneficio (reservado en total ${money(a.vault)}, congelado). El agente sigue operando con su capital de ${money(a.initial)}.`);a._vq=0;a._vt=Date.now();}
+  if(x>=.005){
+    /* de qué bróker sale: primero de donde se ganó (en IBKR + Binance), para que cada bolsillo siga cuadrando con su cuenta real */
+    let left=x;const V=a.vaultV||(a.vaultV={}),Q=a._vqV||(a._vqV={});
+    if(isMix()){const r=vrOf(a);for(const v of ['BN','IB']){const t=Math.min(left,Math.max(0,r[v]||0),freeV(a,v));if(t>0){r[v]-=t;V[v]=(V[v]||0)+t;Q[v]=(Q[v]||0)+t;left-=t;}}
+      if(left>1e-9){const v=freeV(a,'BN')>=left?'BN':'IB';vrOf(a)[v]-=left;V[v]=(V[v]||0)+left;Q[v]=(Q[v]||0)+left;}}
+    else{const v=venOfVault()[0];V[v]=(V[v]||0)+x;Q[v]=(Q[v]||0)+x;}
+    a.cash-=x;a.vault=(a.vault||0)+x;a._vq=(a._vq||0)+x;}
+  if(a._vq>=.005&&Date.now()-(a._vt||0)>600000){
+    for(const v in a._vqV||{})if(a._vqV[v]>=.005)logVault(a,v,a._vqV[v],true);a._vqV={};
+    L(a,'reserve',`A la cartera reservada: +${money(a._vq)} de beneficio (reservado en total ${money(a.vault)}, congelado). El agente sigue operando con su capital de ${money(a.initial)}.`);a._vq=0;a._vt=Date.now();}
+}
+/* la orden real equivalente de apartar (o liberar) beneficio, para que quede igual que en un bróker de verdad */
+function logVault(a,v,amt,out){
+  const am=(Math.floor(amt*100)/100).toFixed(2);
+  const req=v==='BN'?{api:'POST /sapi/v1/asset/transfer',p:{type:out?'MAIN_FUNDING':'FUNDING_MAIN',asset:'USDT',amount:am}}
+    :v==='IB'?{api:'(IBKR no mueve dinero por API: el dinero se queda en la cuenta y la app no lo usa'+(out?'. Para sacarlo: IBKR → Transferir y pagar → Retirar fondos)':')'),p:{currency:'USD',amount:+am}}
+    :{api:'(la app no lo usa para operar; el dinero sigue en la cuenta del exchange)',p:{amount:+am}};
+  const o={t:Date.now(),ag:a.name,sym:'USD',venue:v==='BN'?(out?'Binance · Spot → Funding':'Binance · Funding → Spot'):v==='IB'?'IBKR · apartado en la cuenta':'Exchange',kind:out?'apartar':'liberar',side:out?'OUT':'IN',qty:+am,price:1,fee:0,mode:'simulada',req};
+  ordersOf().unshift(o);if(S.orders.length>300)S.orders.length=300;
+  if(S.settings.exec==='real'&&v==='BN'&&typeof __liveSend==='function'){o.mode='real';try{__liveSend(o);}catch(e){o.err=String(e&&e.message||e);}}
 }
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
 function netIfClose(p,mkt){return inV(p.ven||null,()=>netIfClose0(p,mkt));}

@@ -40,7 +40,10 @@ function applyCmd(c,a){
       const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x)+(x.vault||0),0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
       S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
-      S.runs=(prev.runs||[]).concat([run]).slice(-50);S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.sig=prev.sig;S.pause=prev.pause;
+      S.runs=(prev.runs||[]).concat([run]).slice(-50);
+      /* comparación con no hacer nada: se archiva la de la etapa que termina; la Mezcla de la nueva usa la proporción media de esta */
+      {const B=prev.bench;if(B&&B.sum){run.bench={verdict:B.sum.verdict,adv:B.sum.adv,bot:B.sum.per.etapa.bot&&B.sum.per.etapa.bot.ret,rk:B.sum.per.etapa.rk&&B.sum.per.etapa.rk.ret,days:B.sum.days};const e=B.sum.exp;if(e.s+e.c>0)S.benchPrevS=e.s/(e.s+e.c);}
+       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.sig=prev.sig;S.pause=prev.pause;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados, el laboratorio de señales y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
@@ -67,6 +70,7 @@ function applyCmd(c,a){
       S.settings.maxLoss=v;const n=applyMaxLoss();
       L(null,'info',v?`Límite de pérdida: ninguna operación perderá más de ${money(v)} si salta su stop (comisiones incluidas). Para conseguirlo compra menos cantidad; el stop sigue donde lo pone el plan.${n?` Ajustadas ${n} posición(es) ya abiertas.`:''} Ojo: si el precio salta de golpe por encima del stop (por ejemplo, una noticia), en real se puede perder algo más.`:'Límite de pérdida quitado: cada operación arriesga lo que marca el plan del agente.');
       return ok(v?'Límite de pérdida '+money(v)+' activo.':'Sin límite de pérdida.');}
+    case 'benchundo':return bmUndo(a.k)?ok('Deshecho. No vuelve a tocarlo en un mes.'):no('No hay nada que deshacer.');
     case 'keep':{S.settings.keepProfit=!!a.on;L(null,'info',a.on?'Apartar el beneficio: activado también en Automático. Lo que el agente gane por encima de su capital se aparta y no se usa para operar.':'Apartar el beneficio: desactivado en Automático. El agente reinvierte lo que gana.');return ok(a.on?'Se apartará el beneficio.':'Se reinvertirá el beneficio.');}
     case 'unvault':{const ag=S.agents[0],v=ag&&ag.vault||0;if(!(v>=.01))return no('No hay nada en la cartera reservada.');
       const x=a.amt==null?v:Math.min(v,Math.round(+a.amt*100)/100);if(!(x>=.01))return no('Pon una cantidad válida.');

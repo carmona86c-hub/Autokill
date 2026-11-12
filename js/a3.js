@@ -613,8 +613,214 @@ function sigCard(){
   <p class="note" style="margin:8px 0 0"><b>Acciones automáticas:</b> ${acts.length?acts.map(esc).join(' · '):'ninguna todavía (solo actúa con pruebas claras)'}.</p>`;
 }
 function sigLate(){
-  if(typeof renderStats==='function'&&!renderStats.__sig){const r0=renderStats;renderStats=function(){r0.apply(this,arguments);try{sigCard();}catch(e){}};renderStats.__sig=1;}
-  if(typeof exportView==='function'&&!exportView.__sig){const e0=exportView;exportView=function(){const G=S.sig;if(G)S.sig={sum:G.sum,act:G.act};try{return e0.apply(this,arguments);}finally{if(G)S.sig=G;}};exportView.__sig=1;}
+  if(typeof renderStats==='function'&&!renderStats.__sig){const r0=renderStats;renderStats=function(){r0.apply(this,arguments);try{sigCard();}catch(e){}};renderStats.__sig=1;renderStats.__bm=r0.__bm;}
+  if(typeof exportView==='function'&&!exportView.__sig){const e0=exportView;exportView=function(){const G=S.sig;if(G)S.sig={sum:G.sum,act:G.act};try{return e0.apply(this,arguments);}finally{if(G)S.sig=G;}};exportView.__sig=1;exportView.__bm=e0.__bm;}
 }
 if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('DOMContentLoaded',sigLate);
 {const s0=sigTick;sigTick=function(){sigLate();return s0();};}
+
+/* ======================================================================================
+   COMPARACIÓN CON NO HACER NADA
+   ¿Gana el bot más que quedarse quieto? Desde el inicio de cada etapa se simulan en paralelo cinco carteras:
+   Efectivo, Nasdaq (QQQ en IBKR), Bitcoin (en Binance), Mezcla (Nasdaq + bitcoin en la proporción media del bot en la etapa anterior)
+   y Mismo riesgo (en cada momento, el mismo % que el bot en acciones y en criptos, sin elegir nada).
+   Fases 1-3 solo miden. La fase 4 (frenos automáticos) duerme hasta tener 30 días de datos y solo puede frenar, nunca arriesgar más.
+   ====================================================================================== */
+const BM_DAY=864e5,BMX={q:null,qt:0,fx:null,fxt:0,busy:false};
+const bmGrp=k=>(catOf(k)==='Acciones'||isBS(k))?'stk':'cry';
+function bmQKey(){const U=market.universe||[];return U.find(x=>srcOf(x)==='BF'&&String(base(x)).toUpperCase()==='QQQ')||U.find(x=>srcOf(x)==='HL'&&String(base(x)).toUpperCase()==='QQQ')||null;}
+function bmFetch(){
+  if(BMX.busy||typeof fget!=='function')return;const now=Date.now();
+  const needQ=!(bmQKey()&&pxFresh(bmQKey(),120000))&&now-BMX.qt>120000,needF=now-BMX.fxt>600000;if(!needQ&&!needF)return;BMX.busy=true;
+  Promise.all([needQ?fget('https://fapi.binance.com/fapi/v1/ticker/price?symbol=QQQUSDT').then(j=>{if(j&&+j.price>0){BMX.q=+j.price;BMX.qt=Date.now();}}).catch(()=>{}):0,
+    needF?fget('https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT').then(j=>{if(j&&+j.price>0){BMX.fx=+j.price;BMX.fxt=Date.now();}}).catch(()=>{}):0]).finally(()=>{BMX.busy=false;});
+}
+function bmQ(){const k=bmQKey();if(k&&pxFresh(k,120000))return market.price[k];return BMX.q&&Date.now()-BMX.qt<300000?BMX.q:null;}
+function bmB(){const k=(market.universe||[]).find(x=>srcOf(x)==='BN'&&base(x)==='BTC')||'BN:BTCUSDT';return pxFresh(k,120000)?market.price[k]:null;}
+const bmIbFee=(v,q)=>Math.min(Math.max(.35,.0035*v/q),v*.01);
+const bmSlip=()=>S.settings.slip||.0005;
+function bmTot(){return S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0);}
+function bmExp(tot){let s=0,c=0;for(const a of S.agents)for(const p of a.positions){const v=Math.abs(p.qty*(market.price[p.sym]||p.entry));if(bmGrp(p.sym)==='stk')s+=v;else c+=v;}return {s:tot>0?s/tot:0,c:tot>0?c/tot:0};}
+function bmVals(B,q,b){
+  const sl=bmSlip(),nasG=B.u.nas*q,btcG=B.u.btc*b,mq=B.u.mq*q,mb=B.u.mb*b;
+  return {cash:B.cap0,nas:nasG-bmIbFee(nasG,q)-nasG*sl,btc:btcG*(1-.001-sl),mix:mq-(mq>0?bmIbFee(mq,q):0)-mq*sl+mb*(1-.001-sl),rk:B.rk};
+}
+function bmStart(q,b){
+  const now=Date.now(),cap=bmTot(),prevS=S.benchPrevS!=null?S.benchPrevS:.5,sl=bmSlip();
+  const buyQ=v=>(v-bmIbFee(v,q))/(q*(1+sl)),buyB=v=>v*(1-.001)/(b*(1+sl));
+  S.bench={v:1,t0:now,started:S.startedAt||now,cap0:cap,q0:q,b0:b,fx0:BMX.fx||null,s:prevS,
+    u:{nas:buyQ(cap),btc:buyB(cap),mq:prevS>0?buyQ(cap*prevS):0,mb:prevS<1?buyB(cap*(1-prevS)):0},
+    rk:cap,rkS:0,rkC:0,last:{q,b,t:now,eS:0,eC:0},exp:{t:0,s:0,c:0},pts:[],d:[],lastPt:0,day:null,mk:null,wk:0,sum:null,ai:S.benchAI||null};
+  L(null,'info',`Comparación con no hacer nada: empieza. Las carteras de comparación parten de ${money(cap)} con el Nasdaq a ${px(q)} y el bitcoin a ${px(b)}.`);
+}
+function benchTick(){
+  if(typeof S==='undefined'||!S||!S.agents)return;bmFetch();
+  const q=bmQ(),b=bmB();let B=S.bench;
+  if(!B||B.started!==(S.startedAt||B.started)){if(q&&b)bmStart(q,b);return;}
+  if(!b)return;const now=Date.now(),qn=q&&sessOpen('us',now)?q:B.last.q;
+  /* Mismo riesgo: crece con lo que el bot tenía invertido en cada mercado desde la última revisión */
+  const dq=qn/B.last.q-1,db=b/B.last.b-1,gS=B.rk*B.last.eS*dq,gC=B.rk*B.last.eC*db;B.rkS+=gS;B.rkC+=gC;B.rk+=gS+gC;
+  const tot=bmTot(),e=bmExp(tot),dt=Math.min(now-B.last.t,6*3600e3);B.exp.t+=dt;B.exp.s+=B.last.eS*dt;B.exp.c+=B.last.eC*dt;
+  B.last={q:qn,b,t:now,eS:e.s,eC:e.c};
+  const V=bmVals(B,qn,b),bot=tot,day=new Date(now).toISOString().slice(0,10),lim=S.settings.capNet>0?1:0;
+  if(now-B.lastPt>=3600e3){B.lastPt=now;B.pts.push([now,+bot.toFixed(2),+V.nas.toFixed(2),+V.btc.toFixed(2),+V.mix.toFixed(2),+V.rk.toFixed(2)]);if(B.pts.length>24*45)B.pts.splice(0,B.pts.length-24*45);}
+  /* cierre diario (para las medidas y el veredicto): uno por día, el último valor del día */
+  const sp=bmSplit(B),rec={day,bot:+bot.toFixed(2),nas:+V.nas.toFixed(2),btc:+V.btc.toFixed(2),mix:+V.mix.toFixed(2),rk:+V.rk.toFixed(2),bS:+sp.bS.toFixed(2),bC:+sp.bC.toFixed(2),rS:+B.rkS.toFixed(2),rC:+B.rkC.toFixed(2),lim};
+  const L0=B.d[B.d.length-1];if(L0&&L0.day===day){rec.lim=Math.max(L0.lim,lim);B.d[B.d.length-1]=rec;}else{B.d.push(rec);if(B.d.length>400)B.d.shift();}
+  if(B.day!==day||!B.sum||now-(B.sumT||0)>600000){const newDay=B.day&&B.day!==day;B.day=day;B.sumT=now;B.sum=benchStats(B);
+    if(newDay){try{bmMonkey(B);}catch(e){}B.sum=benchStats(B);try{bmAI(B);}catch(e){}}}
+  /* resumen semanal por Telegram: domingo a las 20:00 de España (19:00 UTC) */
+  const d=new Date(now);if(d.getUTCDay()===0&&d.getUTCHours()>=19&&now-B.wk>20*3600e3){B.wk=now;try{if(tgReady())tgPost(benchWeekly(B));}catch(e){}}
+}
+/* resultado del bot por mercado desde el inicio: lo cerrado más lo abierto */
+function bmSplit(B){let bS=0,bC=0,sh=0;for(const a of S.agents){for(const c of a.closed){if(!(c.t1>=B.t0))continue;if(bmGrp(c.sym)==='stk')bS+=c.pnl;else bC+=c.pnl;if(c.side==='short')sh+=c.pnl;}
+  for(const p of a.positions){if(!(p.openedAt>=B.t0))continue;const v=netIfClose(p,market.price[p.sym]||p.entry);if(bmGrp(p.sym)==='stk')bS+=v;else bC+=v;if(isShort(p))sh+=v;}}
+  return {bS,bC,sh};}
+function bmBoot(diffs,seed){
+  const n=diffs.length;if(n<3)return null;let s=seed>>>0||1;const rnd=()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};
+  let pos=0;const R=2000,blk=3;for(let r=0;r<R;r++){let sum=0,k=0;while(k<n){const st=Math.floor(rnd()*n);for(let j=0;j<blk&&k<n;j++,k++)sum+=diffs[(st+j)%n];}if(sum>0)pos++;}
+  return pos/R;}
+function bmMetrics(vals,cap){
+  if(vals.length<2)return null;const r=[];for(let i=1;i<vals.length;i++)r.push(vals[i]/vals[i-1]-1);
+  const v0=vals[0],v1=vals[vals.length-1];let pk=v0,dd=0;for(const v of vals){if(v>pk)pk=v;dd=Math.max(dd,(pk-v)/pk);}
+  const m=r.reduce((a,b)=>a+b,0)/r.length,sd=Math.sqrt(r.reduce((a,b)=>a+(b-m)**2,0)/Math.max(1,r.length-1));
+  return {ret:v1/v0-1,usd:v1-v0,dd,vol:sd,ratio:sd>0?m/sd:0};}
+function benchStats(B){
+  const now=Date.now(),per={etapa:B.t0,'7 días':now-7*BM_DAY,'30 días':now-30*BM_DAY},out={per:{}};
+  for(const [name,from] of Object.entries(per)){const o={},fd=new Date(from).toISOString().slice(0,10),i0=B.d.findIndex(x=>x.day>fd);
+    for(const k of ['bot','nas','btc','mix','rk']){const rec=i0<0?[]:B.d.slice(i0).map(x=>x[k]),start=from<=B.t0||i0<=0?B.cap0:B.d[i0-1][k];o[k]=bmMetrics([start].concat(rec),B.cap0);}
+    o.cash={ret:0,usd:0,dd:0,vol:0,ratio:0};out.per[name]=o;}
+  const D=B.d,diffs=[],dS=[],dC=[];let better=0,nd=0;
+  for(let i=0;i<D.length;i++){const p=i?D[i-1]:{bot:B.cap0,rk:B.cap0,bS:0,bC:0,rS:0,rC:0};if(D[i].lim)continue;
+    const db=D[i].bot/p.bot-1,dr=D[i].rk/p.rk-1;diffs.push(db-dr);nd++;if(db>dr)better++;dS.push(((D[i].bS-p.bS)-(D[i].rS-p.rS))/B.cap0);dC.push(((D[i].bC-p.bC)-(D[i].rC-p.rC))/B.cap0);}
+  const tradeDays=D.filter(x=>{const w=new Date(x.day).getUTCDay();return w>0&&w<6;}).length;
+  const closed=S.agents.reduce((t,a)=>t+a.closed.filter(c=>c.t1>=B.t0&&!c.user).length,0);
+  const nT=g=>S.agents.reduce((t,a)=>t+a.closed.filter(c=>c.t1>=B.t0&&!c.user&&bmGrp(c.sym)===g).length,0);
+  const seed=Math.floor(now/BM_DAY),p=bmBoot(diffs,seed),pS=bmBoot(dS,seed+1),pC=bmBoot(dC,seed+2);
+  const verdict=(pp,days,n)=>days<20||n<30||pp==null?'pronto':pp>=.95?'gana':pp<=.05?'pierde':'empate';
+  const sp=bmSplit(B),tot=bmTot(),ex=B.exp.t>0?{s:B.exp.s/B.exp.t,c:B.exp.c/B.exp.t}:{s:0,c:0};
+  const fx=BMX.fx,botRet=tot/B.cap0-1;
+  return Object.assign(out,{days:D.length,tradeDays,closed,p,verdict:verdict(p,tradeDays,closed),better:nd?better/nd:null,
+    adv:botRet-(B.rk/B.cap0-1),exp:ex,split:{bS:sp.bS,bC:sp.bC,rS:B.rkS,rC:B.rkC,pS,pC,vS:verdict(pS,tradeDays,nT('stk')),vC:verdict(pC,tradeDays,nT('cry')),nS:nT('stk'),nC:nT('cry')},
+    shorts:sp.sh,eur:B.fx0&&fx?{bot:(1+botRet)*(B.fx0/fx)-1,fx0:B.fx0,fx}:null,limDays:D.filter(x=>x.lim).length});
+}
+/* ---------- prueba del mono: ¿entra el bot mejor que al azar, con las mismas reglas de salida? ---------- */
+function bmMonkey(B){
+  const P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,M=B.mk||(B.mk={last:B.t0,n:0,bot:0,sum:new Array(200).fill(0),runs:0});
+  const trades=[];for(const a of S.agents)for(const c of a.closed)if(c.t0>M.last&&c.t1>=B.t0&&!c.user&&c.tf)trades.push(c);
+  if(!trades.length)return;let s=(Math.floor(Date.now()/BM_DAY)*2654435761)>>>0;const rnd=()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};
+  const SC={};let maxT=M.last;
+  const run=(sr,ef,es,i,sh,cost)=>{const e=sr.k[i].c,atr=sr.A[i];if(!(atr>0))return null;const sd=P.stopATR*atr;
+    const p={sh,e,r:sd,atr,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*atr:e+P.tpATR*atr,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
+    for(let j=i+1;j<sr.k.length;j++){const x=posStep(p,sr.k[j],ef[j],es[j],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;return fr*e/sd;}}return null;};
+  for(const c of trades){
+    const k=kOf(c.tf,c.sym);if(!k||k.length<120)continue;const ck=c.tf+'|'+c.sym,sr=SC[ck]||(SC[ck]=serie(k));
+    const ef=sr.E[P.emaF]||(sr.E[P.emaF]=ema(sr.c,P.emaF)),es=sr.E[P.emaS]||(sr.E[P.emaS]=ema(sr.c,P.emaS));
+    let i=-1;for(let j=sr.k.length-1;j>=0;j--)if(sr.k[j].t<=c.t0){i=j;break;}if(i<60)continue;
+    const sh=c.side==='short',cost=costOf(c.sym),rb=run(sr,ef,es,i,sh,cost);if(rb==null)continue;
+    const ses=sessOf(c.sym),ok=j=>j>=60&&j<sr.k.length-20&&(ses==='24x7'||sessOpen(ses,sr.k[j].t));
+    const cand=[];for(let j=60;j<sr.k.length-20;j++)if(ok(j))cand.push(j);if(cand.length<20)continue;
+    const rm=[];for(let m=0;m<200;m++){let r=null,tries=0;while(r==null&&tries<5){r=run(sr,ef,es,cand[Math.floor(rnd()*cand.length)],sh,cost);tries++;}if(r==null){rm.length=0;break;}rm.push(r);}
+    if(rm.length!==200)continue;M.n++;M.bot+=rb;for(let m=0;m<200;m++)M.sum[m]+=rm[m];if(c.t0>maxT)maxT=c.t0;}
+  M.last=Math.max(M.last,maxT);M.runs++;
+  if(M.n){const mb=M.bot/M.n;M.pct=M.sum.filter(x=>x/M.n<mb).length/200;M.botMean=mb;M.monkMean=M.sum.reduce((a,b)=>a+b,0)/200/M.n;}
+}
+/* ---------- fase 4: aprender de la comparación (dormida hasta 30 días de datos) ---------- */
+function bmAI(B){
+  const sm=B.sum;if(!sm||sm.tradeDays<30)return;const now=Date.now(),A=B.ai||(B.ai={brake:{stk:1,cry:1},until:{},minAdd:0,last:0,chg:null,lock:{},hist:[]});S.benchAI=A;
+  const say=(t)=>{A.hist.unshift({t:now,msg:t});A.hist.length=Math.min(A.hist.length,20);L(null,'evolve','Comparación: '+t);try{if(tgReady())tgPost('🧭 '+t);}catch(e){}};
+  const name={stk:'Acciones',cry:'Criptos'},adv30=g=>{const d=B.d.filter(x=>Date.parse(x.day)>=now-30*BM_DAY&&!x.lim);if(d.length<2)return 0;const a=d[0],z=d[d.length-1];return g==='stk'?((z.bS-a.bS)-(z.rS-a.rS)):((z.bC-a.bC)-(z.rC-a.rC));};
+  for(const g of ['stk','cry'])if(A.brake[g]===0&&A.until[g]&&now>A.until[g]){A.brake[g]=.5;A.until[g]=0;say(`${name[g]}: termina el mes sin operar; vuelve a probar con la mitad de riesgo.`);}
+  /* deshacer solo: si el mes siguiente al cambio no mejoró, vuelve a como estaba */
+  if(A.chg&&now-A.chg.t>=30*BM_DAY){const c=A.chg;A.chg=null;
+    if(c.k==='min'){if(!(B.mk&&B.mk.pct>c.pct0)){A.minAdd=c.from;say(`la exigencia extra para entrar no mejoró nada en un mes: se quita.`);}}
+    else if(adv30(c.k)<=c.adv0){A.brake[c.k]=c.from;A.until[c.k]=0;say(`${name[c.k]}: frenar no mejoró el resultado en un mes; vuelve a como estaba.`);}
+    return;}
+  if(now-A.last<30*BM_DAY)return;
+  const sp=sm.split;
+  for(const g of ['stk','cry']){if(A.lock[g]>now)continue;const v=g==='stk'?sp.vS:sp.vC;
+    if(v==='pierde'&&A.brake[g]>0){const from=A.brake[g],to=from===1?.5:0;A.brake[g]=to;if(!to)A.until[g]=now+30*BM_DAY;A.last=now;A.chg={k:g,from,to,t:now,adv0:adv30(g)};
+      say(`${name[g]} pierde claramente frente a la cartera con su mismo riesgo (${sm.tradeDays} días): ${to?'la mitad de riesgo':'un mes sin operar ese mercado'}.`);return;}
+    if(v==='gana'&&A.brake[g]<1){const from=A.brake[g];A.brake[g]=1;A.until[g]=0;A.last=now;A.chg=null;say(`${name[g]} gana claramente: recupera su riesgo normal.`);return;}}
+  const M=B.mk,P=(S.agents[0]||{}).params||{};
+  if(!(A.lock.min>now)&&M&&M.n>=30&&M.pct<.5&&(P.minScore||63)+A.minAdd+5<=75){const from=A.minAdd;A.minAdd+=5;A.last=now;A.chg={k:'min',from,to:A.minAdd,t:now,pct0:M.pct};
+    say(`las entradas del bot salen peores que al azar (supera solo al ${Math.round(M.pct*100)} % de los monos): pide 5 puntos más para entrar.`);}
+}
+function bmUndo(k){const B=S.bench,A=B&&B.ai;if(!A)return false;const now=Date.now();
+  if(k==='min'){A.minAdd=0;A.lock.min=now+30*BM_DAY;}else{A.brake[k]=1;A.until[k]=0;A.lock[k]=now+30*BM_DAY;}if(A.chg&&A.chg.k===k)A.chg=null;
+  L(null,'info',`Comparación: deshecho por ti (${k==='min'?'exigencia extra para entrar':k==='stk'?'freno en acciones':'freno en criptos'}). No vuelve a tocarlo en un mes.`);return true;}
+/* los frenos de la fase 4 se aplican al decidir y al calcular el tamaño (nunca por debajo de 1/4 del riesgo normal sumando todos los frenos) */
+{const d0=decide;decide=function(a,an,P,T,pre){const r=d0(a,an,P,T,pre);if(r)return r;const A=S.bench&&S.bench.ai;if(!A)return null;
+  const g=bmGrp(an.sym);if(A.brake[g]===0)return `${g==='stk'?'acciones':'criptos'} frenadas un mes por la comparación con no hacer nada`;
+  if(A.minAdd&&an.score!=null&&an.score<P.minScore+A.minAdd)return `puntuación ${an.score}: la comparación con no hacer nada pide ${P.minScore+A.minAdd}`;return null;};}
+{const o1=openPos;openPos=function(a,an,P){const A=S.bench&&S.bench.ai,f=A?A.brake[bmGrp(an.sym)]:1;if(!A||!(f<1)||!(f>0))return o1(a,an,P);
+  const inner=(an.nerv||an.prob)?.5:1,fe=Math.max(f,.25/inner);return o1(a,an,Object.assign({},P,{riskPct:P.riskPct*fe}));};}
+{const r0=routeTrack;routeTrack=function(){r0.apply(this,arguments);try{benchTick();}catch(e){}};}
+RLAB.unshift(['comparación con no hacer nada','frenado por la comparación']);
+/* ---------- textos: informe, Telegram ---------- */
+const bmPct=(x,d=1)=>x==null?'—':(x>=0?'+':'')+(x*100).toFixed(d).replace('.',',')+' %';
+const BM_NAMES={bot:'Bot',cash:'Efectivo',nas:'Nasdaq',btc:'Bitcoin',mix:'Mezcla',rk:'Mismo riesgo'};
+function bmVerdictText(sm){
+  if(!sm)return 'Reuniendo datos.';const o=sm.per.etapa,b=o.bot,r=o.rk;
+  const head=`En ${sm.days} día${sm.days===1?'':'s'}, el bot ${b?bmPct(b.ret):'—'}; la cartera con su mismo riesgo ${r?bmPct(r.ret):'—'}. Ventaja ${(sm.adv>=0?'+':'')+(sm.adv*100).toFixed(1).replace('.',',')} puntos`;
+  return sm.verdict==='pronto'?`${head}. Veredicto: aún pronto (${sm.tradeDays} de 20 días de bolsa, ${sm.closed} de 30 operaciones).`
+    :`${head}, y en el ${Math.round((sm.p||0)*100)} % de las repeticiones sigue por delante: ${sm.verdict==='gana'?'gana claramente':sm.verdict==='pierde'?'pierde claramente':'empate técnico'}.`;}
+function benchReport(){
+  const B=S.bench;if(!B||!B.sum)return '\nCOMPARACIÓN CON NO HACER NADA: reuniendo datos.\n';const sm=B.sum,o=sm.per.etapa,sp=sm.split;
+  const row=k=>{const m=o[k];return m?`  ${BM_NAMES[k].padEnd(13)} ${bmPct(m.ret,2).padStart(9)}  ${sgn(m.usd).padStart(9)}  peor caída ${bmPct(-m.dd,1)}`:'';};
+  return `\nCOMPARACIÓN CON NO HACER NADA (desde ${new Date(B.t0).toISOString().slice(0,16).replace('T',' ')} UTC, ${money(B.cap0)})\n  ${bmVerdictText(sm)}\n${['bot','rk','mix','nas','btc','cash'].map(row).join('\n')}\n`+
+    `  Tiempo invertido de media: ${Math.round((sm.exp.s+sm.exp.c)*100)} % (acciones ${Math.round(sm.exp.s*100)} %, criptos ${Math.round(sm.exp.c*100)} %)\n`+
+    `  Por mercado: acciones bot ${sgn(sp.bS)} vs mismo riesgo ${sgn(sp.rS)} (${sp.vS}); criptos bot ${sgn(sp.bC)} vs ${sgn(sp.rC)} (${sp.vC})\n`+
+    `  Cortos: ${sgn(sm.shorts)}${sm.eur?` · En euros: bot ${bmPct(sm.eur.bot,2)}`:''}${sm.limDays?` · ${sm.limDays} día(s) con modo límite (no cuentan en el veredicto)`:''}\n`+
+    (B.mk&&B.mk.n?`  Prueba del mono: ${B.mk.n} operaciones; el bot supera al ${Math.round(B.mk.pct*100)} % de 200 monos (${B.mk.n<30?'aún pocos datos':B.mk.pct>=.95?'sus entradas aportan':B.mk.pct<.05?'entra peor que al azar':'no se puede decir que aporten'})\n`:'')+
+    (B.ai&&B.ai.hist&&B.ai.hist.length?`  Fase 4: ${B.ai.hist.slice(0,3).map(h=>h.msg).join(' | ')}\n`:'');
+}
+function benchWeekly(B){
+  const sm=B.sum;if(!sm)return 'Comparación: aún sin datos.';const o=sm.per['7 días'];const f=k=>o&&o[k]?bmPct(o[k].ret):'—';
+  return `📊 Semana: bot ${f('bot')}, Nasdaq ${f('nas')}, bitcoin ${f('btc')}, Mismo riesgo ${f('rk')}. Veredicto: ${sm.verdict==='pronto'?`aún pronto (${sm.tradeDays} días)`:sm.verdict==='gana'?'gana claramente':sm.verdict==='pierde'?'pierde claramente':'empate técnico'}.`;}
+{const p0=protReport;protReport=function(){return p0.apply(this,arguments)+benchReport();};}
+/* ---------- tarjeta «¿Vale la pena el bot?» ---------- */
+let bmPer='etapa';
+const BM_COL={bot:'#2f7de1',cash:'#8a8f98',nas:'#16a34a',btc:'#f59e0b',mix:'#a855f7',rk:'#e5484d'};
+function bmChart(B){
+  const from=bmPer==='etapa'?B.t0:Date.now()-(bmPer==='7 días'?7:30)*BM_DAY,pts=B.pts.filter(p=>p[0]>=from);if(pts.length<2)return '<p class="note">El gráfico aparece tras un par de horas.</p>';
+  const keys=['bot','nas','btc','mix','rk'],idx={bot:1,nas:2,btc:3,mix:4,rk:5},n=pts.length,W=320,H=150,base0={};keys.forEach(k=>base0[k]=pts[0][idx[k]]);
+  const norm=(p,k)=>p[idx[k]]/base0[k]*100;let lo=100,hi=100;pts.forEach(p=>keys.forEach(k=>{const v=norm(p,k);if(v<lo)lo=v;if(v>hi)hi=v;}));const pad=(hi-lo)*.1||.5;lo-=pad;hi+=pad;
+  const X=i=>(i/(n-1))*(W-8)+4,Y=v=>H-6-(v-lo)/(hi-lo)*(H-12);
+  const line=k=>`<polyline fill="none" stroke="${BM_COL[k]}" stroke-width="${k==='bot'?2.6:k==='rk'?2:1.4}" ${k==='rk'?'stroke-dasharray="5 3"':''} points="${pts.map((p,i)=>X(i).toFixed(1)+','+Y(norm(p,k)).toFixed(1)).join(' ')}"/>`;
+  const y100=Y(100);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Bot frente a las carteras de comparación, base 100">
+    <line x1="0" x2="${W}" y1="${y100}" y2="${y100}" stroke="${BM_COL.cash}" stroke-dasharray="2 3" stroke-width="1"/>${['btc','nas','mix','rk','bot'].map(line).join('')}</svg>
+    <div class="note" style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px">${['bot','rk','mix','nas','btc','cash'].map(k=>`<span><i style="display:inline-block;width:10px;height:3px;background:${BM_COL[k]};vertical-align:middle;margin-right:4px"></i>${BM_NAMES[k]}</span>`).join('')}</div>`;}
+function benchCard(){
+  if(typeof document==='undefined'||!document.getElementById)return;const host=document.getElementById('s-stats');if(!host||!host.insertBefore)return;
+  let box=document.getElementById('benchCard');if(!box){box=document.createElement('div');box.className='card';box.id='benchCard';host.insertBefore(box,host.firstChild);
+    box.addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('button');if(!b)return;if(b.dataset.bper){bmPer=b.dataset.bper;benchCard();}
+      if(b.dataset.bmundo){const r=await act('benchundo',{k:b.dataset.bmundo});if(r&&!r.ok)alert(r.msg);benchCard();}});}
+  const B=S.bench;if(!B||!B.sum){box.innerHTML='<h2>¿Vale la pena el bot?</h2><p class="note" style="margin:0">Empieza a compararse con no hacer nada en cuanto haya precio del Nasdaq y del bitcoin (con la bolsa de EE. UU. abierta). Los primeros números salen el mismo día; el veredicto fiable, en unas 4 semanas.</p>';return;}
+  const sm=B.sum,o=sm.per[bmPer]||sm.per.etapa,sp=sm.split,M=B.mk,A=B.ai;
+  const cell=(m,k)=>m?`<td class="${m[k]>=0?'up':'down'}">${k==='usd'?sgn(m[k]):k==='dd'?bmPct(-m.dd):k==='ratio'?m.ratio.toFixed(2).replace('.',','):k==='vol'?(m.vol*100).toFixed(2).replace('.',',')+' %':bmPct(m[k],2)}</td>`:'<td>—</td>';
+  const rows=['bot','rk','mix','nas','btc','cash'].map(k=>{const m=o[k];return `<tr${k==='bot'?' style="font-weight:600"':''}><td><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${BM_COL[k]};margin-right:6px"></i>${BM_NAMES[k]}</td>${cell(m,'ret')}${cell(m,'usd')}${m?`<td>${bmPct(-m.dd)}</td><td>${(m.vol*100).toFixed(2).replace('.',',')} %</td><td>${m.ratio.toFixed(2).replace('.',',')}</td>`:'<td>—</td><td>—</td><td>—</td>'}</tr>`;}).join('');
+  const vtxt=v=>v==='pronto'?'aún pronto':v==='gana'?'gana claramente':v==='pierde'?'pierde claramente':'empate técnico';
+  const lims=[];if(A){if(A.brake.stk<1)lims.push(['stk',A.brake.stk?'Acciones con la mitad de riesgo':'Acciones: un mes sin operar']);if(A.brake.cry<1)lims.push(['cry',A.brake.cry?'Criptos con la mitad de riesgo':'Criptos: un mes sin operar']);if(A.minAdd)lims.push(['min',`Pide ${A.minAdd} puntos más para entrar`]);}
+  box.innerHTML=`<h2>¿Vale la pena el bot?</h2>
+  <p style="margin:0 0 8px"><b>${esc(bmVerdictText(sm))}</b></p>
+  <div class="row" style="gap:6px;margin-bottom:6px">${['etapa','7 días','30 días'].map(p=>`<button class="btn${bmPer===p?' pri':''}" type="button" data-bper="${p}" aria-pressed="${bmPer===p}" style="padding:6px 10px;flex:1">${p==='etapa'?'Etapa':p}</button>`).join('')}</div>
+  ${bmChart(B)}
+  <div class="tw" style="margin-top:8px"><table><tr><th>Cartera</th><th>Rentab.</th><th>$</th><th>Peor caída</th><th>Altibajos</th><th>Ganancia por susto</th></tr>${rows}</table></div>
+  <p class="note" style="margin:8px 0 0">Tiempo invertido de media: <b>${Math.round((sm.exp.s+sm.exp.c)*100)} %</b> (acciones ${Math.round(sm.exp.s*100)} %, criptos ${Math.round(sm.exp.c*100)} %). ${sm.better!=null?`Días mejores que Mismo riesgo: ${Math.round(sm.better*100)} %.`:''}</p>
+  <div class="tw" style="margin-top:6px"><table><tr><th>Por mercado</th><th>Bot</th><th>Mismo riesgo</th><th>Veredicto</th></tr>
+    <tr><td>Acciones (IBKR y Binance)</td><td class="${sp.bS>=0?'up':'down'}">${sgn(sp.bS)}</td><td class="${sp.rS>=0?'up':'down'}">${sgn(sp.rS)}</td><td>${vtxt(sp.vS)} (${sp.nS} op.)</td></tr>
+    <tr><td>Criptos</td><td class="${sp.bC>=0?'up':'down'}">${sgn(sp.bC)}</td><td class="${sp.rC>=0?'up':'down'}">${sgn(sp.rC)}</td><td>${vtxt(sp.vC)} (${sp.nC} op.)</td></tr></table></div>
+  <p class="note" style="margin:6px 0 0">Cortos: ${sgn(sm.shorts)}.${sm.eur?` En euros, el bot va ${bmPct(sm.eur.bot,2)} (euro/dólar de ${sm.eur.fx0.toFixed(4)} a ${sm.eur.fx.toFixed(4)}).`:''}${sm.limDays?` ${sm.limDays} día(s) con el modo límite: tus ventas cambian el resultado y esos días no cuentan para el veredicto.`:''}</p>
+  <p class="note" style="margin:6px 0 0"><b>Prueba del mono:</b> ${M&&M.n?`en ${M.n} operaciones, el bot supera al <b>${Math.round(M.pct*100)} %</b> de 200 monos que entran al azar con sus mismas salidas (necesita 95 %). ${M.n<30?'Aún pocos datos.':M.pct>=.95?'Sus entradas aportan.':M.pct<.05?'Entra peor que al azar.':'No se puede decir que sus entradas aporten.'}`:'se calcula cada madrugada con las operaciones cerradas; aún sin datos.'}</p>
+  <p class="note" style="margin:6px 0 0"><b>Aprendizaje (fase 4):</b> ${sm.tradeDays<30?`dormido hasta tener 30 días de datos (lleva ${sm.tradeDays}).`:lims.length?'':'activo; sin cambios por ahora.'}</p>
+  ${lims.map(([k,t])=>`<div class="row" style="gap:8px;align-items:center;margin-top:4px"><span class="note" style="flex:1">${esc(t)}</span><button class="btn" type="button" data-bmundo="${k}" style="padding:6px 10px">Deshacer</button></div>`).join('')}`;
+}
+function benchLate(){
+  if(typeof renderStats==='function'&&!renderStats.__bm){const r0=renderStats;renderStats=function(){r0.apply(this,arguments);try{benchCard();}catch(e){}};renderStats.__bm=1;renderStats.__sig=r0.__sig;}
+  if(typeof updateHero==='function'&&!updateHero.__bm){const u0=updateHero;updateHero=function(){u0.apply(this,arguments);try{const el=document.getElementById('hBotD'),B=S.bench;if(el&&B&&B.sum){let t=document.getElementById('hBench');if(!t){t=document.createElement('div');t.id='hBench';t.className='note';t.style.marginTop='2px';el.parentNode.appendChild(t);}t.textContent=`vs. no hacer nada: ${(B.sum.adv>=0?'+':'')+(B.sum.adv*100).toFixed(1).replace('.',',')} pts`;}}catch(e){}};updateHero.__bm=1;}
+  if(typeof exportView==='function'&&!exportView.__bm){const e0=exportView;exportView=function(){const B=S.bench;if(B&&B.pts&&B.pts.length>200){const cut=Date.now()-7*BM_DAY;S.bench=Object.assign({},B,{pts:B.pts.filter((p,i)=>p[0]>=cut||i%6===0)});}try{return e0.apply(this,arguments);}finally{S.bench=B;}};exportView.__bm=1;exportView.__sig=e0.__sig;}
+}
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('DOMContentLoaded',benchLate);
+{const s1=sigTick;sigTick=function(){benchLate();return s1();};}

@@ -169,7 +169,8 @@ function renderPanel(){
       ${posCandles(p).length>=5?`<canvas class="pchart" data-k="${key}" style="width:100%;height:150px;display:block;margin:2px 0" aria-label="Gráfico de ${esc(base(p.sym))}"></canvas>`:`<div class="bar"><i style="left:${pos}%"></i></div>`}
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
       <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>velas ${p.tf||S.settings.tf}</span></div>
-      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div></div>`:''}</div>`;}).join(''):
+      <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
+      <div class="row" style="margin-top:8px"><button class="btn" type="button" data-sell="${key}" style="width:100%">${sellArm===key.replace(/&amp;/g,'&')&&Date.now()-sellT<5000?'¿Seguro? Toca otra vez para vender':`Vender ahora (${sgn(net)} limpios)`}</button></div></div>`:''}</div>`;}).join(''):
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
   const find=k=>{const i=k.lastIndexOf('|'),sym=k.slice(0,i).replace(/&amp;/g,'&'),t=k.slice(i+1);const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);return it&&it[1];};
   document.querySelectorAll('#posList canvas.spark').forEach(cv=>{const p=find(cv.dataset.k);if(p)drawSpark(cv,p);});
@@ -214,7 +215,15 @@ function drawPos(cv,p){
 }
 /* cada posición abierta es un desplegable: resumen con mini gráfica; al tocarla, el detalle */
 const posOpen=new Set();
-$('posList').addEventListener('click',e=>{
+/* venta a mano: hay que tocar dos veces (la primera pide confirmación) para no vender por un toque sin querer */
+var sellArm=null,sellT=0;
+$('posList').addEventListener('click',async e=>{
+  const sb=e.target.closest&&e.target.closest('button[data-sell]');
+  if(sb){const k=sb.dataset.sell.replace(/&amp;/g,'&');
+    if(sellArm!==k||Date.now()-sellT>5000){sellArm=k;sellT=Date.now();sb.textContent='¿Seguro? Toca otra vez para vender';return;}
+    sellArm=null;sb.disabled=true;sb.textContent='Vendiendo…';const i=k.lastIndexOf('|');
+    const r=await act('possell',{sym:k.slice(0,i),t:k.slice(i+1)});sb.disabled=false;sb.textContent=r&&r.msg?r.msg:(r&&r.ok?'Vendido.':'No se pudo vender.');
+    if(r&&r.ok){posOpen.delete(k);setTimeout(render,1500);}return;}
   const tg=e.target.closest&&e.target.closest('button[data-tog]');if(!tg)return;
   const k=tg.dataset.tog.replace(/&amp;/g,'&');posOpen.has(k)?posOpen.delete(k):posOpen.add(k);render();
 });

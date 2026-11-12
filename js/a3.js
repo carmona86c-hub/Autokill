@@ -285,24 +285,30 @@ function serie(k){
    vela siguiente a la señal, paga comisiones y deslizamiento, a +1R vende la mitad y sube el stop a la entrada, desde +1,5R
    trailing, y al llegar al objetivo lo deja correr. Si en una vela se tocan stop y algo favorable, cuenta el stop (lo peor).
    rL: límite de ganancia limpia opcional (en tanto por uno de la posición) para estudiar variantes. */
+/* una vela de una posición abierta con las reglas de venta del bot. Devuelve {px,why} si sale en esta vela, o null.
+   La usan la automejora (simCore) y el laboratorio de señales, para que los dos midan igual que opera el bot. */
+function posStep(p,b,efi,esi,P,cost){
+  p.bars++;
+  {const best=p.sh?b.l:b.h,worst=p.sh?b.h:b.l,f=(p.sh?p.e-best:best-p.e)/p.r,ad=(p.sh?worst-p.e:p.e-worst)/p.r;if(f>p.mfe)p.mfe=f;if(ad>p.mae)p.mae=ad;}
+  if(p.sh?b.h>=p.stop:b.l<=p.stop)return {px:p.stop,why:p.half?'stop tras vender la mitad':'stop'};
+  if(p.cap&&(p.sh?b.l<=p.cap:b.h>=p.cap))return {px:p.cap,why:'límite'};
+  const best=p.sh?b.l:b.h,fav=(p.sh?p.e-best:best-p.e)/p.r;
+  if(!p.half&&fav>=1){p.half=true;p.r1=p.r/p.e-cost;const be=p.e*(p.sh?1-cost:1+cost);p.stop=p.sh?Math.min(p.stop,be):Math.max(p.stop,be);}
+  if(p.sh){if(b.l<p.low)p.low=b.l;}else if(b.h>p.high)p.high=b.h;
+  if(!p.run&&(p.sh?b.l<=p.tp:b.h>=p.tp))p.run=true;
+  if(fav>=1.5||p.run){const d=(p.run?1:P.trailATR)*p.atr;p.stop=p.sh?Math.min(p.stop,p.low+d):Math.max(p.stop,p.high-d);}
+  const prog=(p.sh?p.e-b.c:b.c-p.e)/p.r,cross=p.sh?efi>esi:efi<esi;
+  if(cross&&prog>0){const be=p.e*(p.sh?1-cost:1+cost);p.stop=p.sh?Math.min(p.stop,be):Math.max(p.stop,be);}
+  if(p.bars>=P.maxHold)return {px:b.c,why:'tiempo'};
+  if(cross&&prog<=0)return {px:b.c,why:'cruce'};
+  if(p.bars>=16&&prog<.25&&!p.half)return {px:b.c,why:'sin avance'};
+  return null;
+}
 function simCore(s,P,i0,i1,cost,shorts,rL){
   const {k,c,R,A,HI,LO,VA}=s,ef=s.E[P.emaF]||(s.E[P.emaF]=ema(c,P.emaF)),es=s.E[P.emaS]||(s.E[P.emaS]=ema(c,P.emaS)),out=[];let p=null;
   const fin=x=>{const rr=(p.sh?p.e-x:x-p.e)/p.e-cost;out.push({r:p.half?(p.r1+rr)/2:rr,bars:p.bars,sz:p.sz});p=null;};
   for(let i=Math.max(i0,60);i<i1;i++){
-    if(p){
-      const b=k[i];p.bars++;
-      if(p.sh?b.h>=p.stop:b.l<=p.stop){fin(p.stop);continue;}
-      if(p.cap&&(p.sh?b.l<=p.cap:b.h>=p.cap)){fin(p.cap);continue;}
-      const best=p.sh?b.l:b.h,fav=(p.sh?p.e-best:best-p.e)/p.r;
-      if(!p.half&&fav>=1){p.half=true;p.r1=p.r/p.e-cost;const be=p.e*(p.sh?1-cost:1+cost);p.stop=p.sh?Math.min(p.stop,be):Math.max(p.stop,be);}
-      if(p.sh){if(b.l<p.low)p.low=b.l;}else if(b.h>p.high)p.high=b.h;
-      if(!p.run&&(p.sh?b.l<=p.tp:b.h>=p.tp))p.run=true;
-      if(fav>=1.5||p.run){const d=(p.run?1:P.trailATR)*p.atr;p.stop=p.sh?Math.min(p.stop,p.low+d):Math.max(p.stop,p.high-d);}
-      const prog=(p.sh?p.e-b.c:b.c-p.e)/p.r,cross=p.sh?ef[i]>es[i]:ef[i]<es[i];
-      if(cross&&prog>0){const be=p.e*(p.sh?1-cost:1+cost);p.stop=p.sh?Math.min(p.stop,be):Math.max(p.stop,be);}
-      if(p.bars>=P.maxHold||(cross&&prog<=0)||(p.bars>=16&&prog<.25&&!p.half))fin(b.c);
-      continue;
-    }
+    if(p){const x=posStep(p,k[i],ef[i],es[i],P,cost);if(x)fin(x.px);continue;}
     if(i+1>=i1)break;
     const a=A[i],ap=a/c[i];if(!(ap>=.002&&ap<=.06)||P.tpATR*ap<Math.max(.006,3*cost))continue;
     const r=R[i],vol=k[i].v>1.3*VA[i];let sh=null;
@@ -310,7 +316,7 @@ function simCore(s,P,i0,i1,cost,shorts,rL){
     else if(shorts&&ef[i]<es[i]&&c[i]<es[i]&&r<=100-P.rsiMin&&r>=100-P.rsiMax&&40+(es[i]<es[i-3]?10:0)+(r<=50&&r>=35?5:0)+(c[i]<LO[i]?P.wBrk:0)+(vol?P.wVol:0)>=P.minScore)sh=true;
     if(sh===null)continue;
     const e=k[i+1].o,sd=P.stopATR*a;
-    p={sh,e,r:sd,atr:a,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*a:e+P.tpATR*a,cap:rL>0&&isFinite(rL)?(sh?e*(1-rL-cost):e*(1+rL+cost)):0,high:e,low:e,bars:0,half:false,run:false,r1:0,sz:Math.min(.25,.01*e/sd)};
+    p={sh,e,r:sd,atr:a,stop:sh?e+sd:e-sd,tp:sh?e-P.tpATR*a:e+P.tpATR*a,cap:rL>0&&isFinite(rL)?(sh?e*(1-rL-cost):e*(1+rL+cost)):0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0,sz:Math.min(.25,.01*e/sd)};
   }
   return out;
 }
@@ -509,22 +515,24 @@ function sigRecord(a,an,P,why){
   if(!an||!an.trend||a.id!==0)return;const G=sigOf(),c=kOf(an.tf,an.sym);if(!c||c.length<60)return;
   const id=an.sym+'|'+an.tf+'|'+an.side+'|'+c[c.length-1].t;if(G.open.some(x=>x.id===id))return;
   const sd=P.stopATR*an.atr;if(!(sd>0))return;
-  G.open.push({id,k:an.sym,tf:an.tf,sh:an.side==='short'?1:0,t:Date.now(),e:an.price,sd,tp:P.tpATR*an.atr,cR:costOf(an.sym)*an.price/sd,
+  G.open.push({id,v:2,k:an.sym,tf:an.tf,sh:an.side==='short'?1:0,t:Date.now(),e:an.price,sd,a:an.atr,cf:costOf(an.sym),tp:P.tpATR*an.atr,cR:costOf(an.sym)*an.price/sd,
     h:Math.min(P.maxHold||48,48),dec:why?rlab(why):'apta: entra',f:(f=>SIG_FK.map(x=>f[x]??null))(sigFeat(a,an,P))});
   if(G.open.length>800){let drop=G.open.length-800;G.open=G.open.filter(x=>drop<=0||SIG_OK.has(x.dec)||(drop--,false));if(G.open.length>800)G.open.splice(0,G.open.length-800);}
 }
 /* sigue cada ficha con las velas de su marco: objetivo o stop (si en la misma vela se tocan los dos, cuenta el stop) */
 function sigResolve(){
-  const G=sigOf(),keep=[];
+  /* cada ficha se sigue con las mismas reglas de venta que usa el bot (mitad a +1R, stop a la entrada, trailing, cruce de medias,
+     sin avance y tiempo máximo), con las velas de su marco. Resultado en R, ya descontados los costes. */
+  const G=sigOf(),keep=[],P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,SC={};
   for(const s of G.open){
-    const c=kOf(s.tf,s.k);if(!c){if(Date.now()-s.t>3*864e5)continue;keep.push(s);continue;}
-    const after=c.filter(x=>x.t>s.t);let out=null,mfe=0,mae=0;
-    for(let i=0;i<after.length&&i<s.h;i++){const b=after[i],up=(s.sh?s.e-b.l:b.h-s.e)/s.sd,dn=(s.sh?b.h-s.e:s.e-b.l)/s.sd;
-      mfe=Math.max(mfe,up);mae=Math.max(mae,dn);
-      if(dn>=1){out={r:-1,res:'stop'};break;}if(up*s.sd>=s.tp){out={r:s.tp/s.sd,res:'objetivo'};break;}}
-    if(!out&&after.length>=s.h){const l=after[s.h-1].c;out={r:(s.sh?s.e-l:l-s.e)/s.sd,res:'tiempo'};}
+    const c=kOf(s.tf,s.k);if(!c||c.length<60){if(Date.now()-s.t>3*864e5)continue;keep.push(s);continue;}
+    const ck=s.tf+'|'+s.k,sr=SC[ck]||(SC[ck]=serie(c)),ef=sr.E[P.emaF]||(sr.E[P.emaF]=ema(sr.c,P.emaF)),es=sr.E[P.emaS]||(sr.E[P.emaS]=ema(sr.c,P.emaS));
+    let i0=sr.k.findIndex(x=>x.t>s.t);if(i0<0){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    const cost=s.cf!=null?s.cf:s.cR*s.sd/s.e,atr=s.a||s.sd/P.stopATR,sh=!!s.sh,e=s.e;
+    const p={sh,e,r:s.sd,atr,stop:sh?e+s.sd:e-s.sd,tp:sh?e-P.tpATR*atr:e+P.tpATR*atr,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
+    let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,res:x.why};break;}}
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
-    G.list.unshift({t:s.t,k:s.k,dec:s.dec,f:s.f,r:+(out.r-s.cR).toFixed(3),res:out.res,mfe:+mfe.toFixed(2),mae:+mae.toFixed(2)});
+    G.list.unshift({v:2,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2)});
   }
   G.open=keep;sigTrim(G);
 }
@@ -535,7 +543,7 @@ function sigTrim(G){let junk=0;G.list=G.list.filter(x=>SIG_OK.has(x.dec)||++junk
 const mstat=v=>{const n=v.length;if(!n)return {n:0,m:0,t:0,w:0};const m=v.reduce((a,b)=>a+b,0)/n,sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/(n-1)):0;return {n,m,t:sd>0?m/(sd/Math.sqrt(n)):0,w:v.filter(x=>x>0).length/n};};
 /* análisis: para cada característica y cada valor, cuántas señales, cuántas ganaron, R medio y si la diferencia es clara (t) */
 function sigAnalyze(){
-  const G=sigOf(),LA=G.list.filter(x=>Date.now()-x.t<30*864e5),L0=LA.filter(x=>SIG_OK.has(x.dec)),all=mstat(L0.map(x=>x.r)),feats={};
+  const G=sigOf(),LA=G.list.filter(x=>x.v===2&&Date.now()-x.t<30*864e5),L0=LA.filter(x=>SIG_OK.has(x.dec)),all=mstat(L0.map(x=>x.r)),feats={};
   for(const s of L0)s.f.forEach((fv,i)=>{if(fv==null)return;const fk=SIG_FK[i],o=(feats[fk]=feats[fk]||{});(o[fv]=o[fv]||[]).push(s.r);});
   const rows=[];for(const fk in feats)for(const fv in feats[fk]){const st=mstat(feats[fk][fv]);rows.push({f:fk,v:fv,...st,d:st.m-all.m});}
   const dec={};for(const s of LA)(dec[s.dec]=dec[s.dec]||[]).push(s.r);
@@ -555,7 +563,7 @@ const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tend
 const SIG_FILTERS=['mercado de lado','contra la tendencia del Nasdaq','primeros 15 min de bolsa','día de noticias'];
 function sigAct(){
   const G=sigOf(),sm=G.sum;if(!sm)return;const A=G.act,tg=t=>{L(null,'evolve',t);try{tgPost('🔬 Automaton · '+t);}catch(e){}};
-  const rowsBy={},base=sm.all;for(const s of G.list.filter(x=>Date.now()-x.t<30*864e5&&SIG_OK.has(x.dec)))for(const fk of SIG_FEATS_BLOCK){const fv=s.f[SIG_FK.indexOf(fk)];if(fv==null||fv==='sin dato')continue;(rowsBy[fk+'='+fv]=rowsBy[fk+'='+fv]||[]).push(s.r);}
+  const rowsBy={},base=sm.all;for(const s of G.list.filter(x=>x.v===2&&Date.now()-x.t<30*864e5&&SIG_OK.has(x.dec))) /* solo las medidas con las reglas de venta del bot */for(const fk of SIG_FEATS_BLOCK){const fv=s.f[SIG_FK.indexOf(fk)];if(fv==null||fv==='sin dato')continue;(rowsBy[fk+'='+fv]=rowsBy[fk+'='+fv]||[]).push(s.r);}
   /* solo se bloquea lo que pierde de forma clara y además es bastante peor que la media (0,2R); como mucho 6 a la vez, los peores.
      Si todo pierde, el problema es la estrategia: no se bloquea todo, se informa. */
   const cand=Object.entries(rowsBy).map(([key,v])=>({key,st:mstat(v)})).filter(x=>x.st.n>=SIG_N&&x.st.m<0&&x.st.t<=-SIG_T&&x.st.m<base.m-.2).sort((x,y)=>x.st.m-y.st.m).slice(0,SIG_MAXBLOCK),worst=new Set(cand.map(x=>x.key));

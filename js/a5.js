@@ -62,6 +62,11 @@ function applyCmd(c,a){
       if(v===S.settings.capNet||(v==null&&!S.settings.capNet))return ok('Sin cambios.');
       S.settings.capNet=v;L(null,'info',v?`Modo límite: cada operación se vende en cuanto deja ${money(v)} limpios (tras comisiones). El stop y el resto de reglas del agente siguen igual. Lo que gane por encima de su capital pasa a la cartera reservada (congelada). Estas ventas van a tu registro, no al aprendizaje del agente.`:'Modo automático: el agente vuelve a vender solo con su plan. Lo ya reservado sigue congelado.');
       S.agents.forEach(checkExits);S.agents.forEach(sweep);return ok(v?'Límite '+money(v)+' activo.':'Automático.');}
+    case 'maxloss':{const v=a.v==null||a.v===''?null:Math.round(+a.v*100)/100;
+      if(v!=null&&!(v>=.5&&v<=1000))return no('Pon un límite de pérdida entre 0,50 y 1000 $.');
+      S.settings.maxLoss=v;const n=applyMaxLoss();
+      L(null,'info',v?`Límite de pérdida: ninguna operación perderá más de ${money(v)} si salta su stop (comisiones incluidas). Para conseguirlo compra menos cantidad; el stop sigue donde lo pone el plan.${n?` Ajustadas ${n} posición(es) ya abiertas.`:''} Ojo: si el precio salta de golpe por encima del stop (por ejemplo, una noticia), en real se puede perder algo más.`:'Límite de pérdida quitado: cada operación arriesga lo que marca el plan del agente.');
+      return ok(v?'Límite de pérdida '+money(v)+' activo.':'Sin límite de pérdida.');}
     case 'keep':{S.settings.keepProfit=!!a.on;L(null,'info',a.on?'Apartar el beneficio: activado también en Automático. Lo que el agente gane por encima de su capital se aparta y no se usa para operar.':'Apartar el beneficio: desactivado en Automático. El agente reinvierte lo que gana.');return ok(a.on?'Se apartará el beneficio.':'Se reinvertirá el beneficio.');}
     case 'unvault':{const ag=S.agents[0],v=ag&&ag.vault||0;if(!(v>=.01))return no('No hay nada en la cartera reservada.');
       const x=a.amt==null?v:Math.min(v,Math.round(+a.amt*100)/100);if(!(x>=.01))return no('Pon una cantidad válida.');

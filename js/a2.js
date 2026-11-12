@@ -333,6 +333,18 @@ function kill(a,why){
 }
 /* cartera reservada: solo con tu límite de ganancia puesto. Lo que el agente original tenga por encima de su capital
    pasa, en efectivo, a una cartera aparte y congelada; el agente sigue operando con su capital. En automático no se aparta nada. */
+/* al poner o bajar el límite de pérdida, las posiciones ya abiertas acercan su stop para respetarlo
+   (en real: se cambia la orden de stop en el bróker). Si ya pierden más que el límite, se venden. */
+function applyMaxLoss(){
+  const ML=S.settings.maxLoss;if(!(ML>0))return 0;let n=0;
+  for(const a of S.agents)for(const p of a.positions.slice()){
+    const sh=isShort(p),slip=slipOf(p.sym),fe=feeOf(p.sym),room=(ML-(p.fees||0))/p.qty/(1+slip+fe);
+    const ns=sh?p.entry+room:p.entry-room;if(!(room>0)){closePos(a,p,'límite de pérdida',undefined,'manual');n++;continue;}
+    if(sh?ns<p.stop:ns>p.stop){const price=market.price[p.sym];
+      if(price&&(sh?price>=ns:price<=ns)){if(pxFresh(p.sym,90000)&&sessOpen(sessOf(p.sym),Date.now())){closePos(a,p,'límite de pérdida',undefined,'manual');n++;}continue;}
+      p.stop=rp(p.sym,ns);syncStop(p);n++;}}
+  return n;
+}
 /* apartar el beneficio: lo que pase del capital del agente se aparta y no se usa para operar.
    Pasa con el modo límite y, si lo activas, también en Automático. En real se hace igual:
    - Binance: se pasa de la cartera de operar (Spot) a la cartera Funding con su API (transferencia interna, sin retirar nada).
@@ -396,6 +408,12 @@ function sizeOn(a,an,P,cash){
   const bad=vet(an.sym,qty,entry);if(bad)return {err:bad,lack};
   /* la comisión real puede ser algo mayor que la estimada (mínimo por orden): si no cabe, se ajusta la cantidad al efectivo disponible */
   {const f0=feeAmt(an.sym,qty,entry,sh);if(qty*entry+f0>cash){const w=Math.max(0,cash-f0-1e-6)/entry;qty=wholeOnly(an.sym,sh)?Math.floor(w):rq(an.sym,w);const b2=vet(an.sym,qty,entry);if(b2)return {err:b2,lack};}}
+  /* tu límite de pérdida por operación: si salta el stop, entre precio, deslizamiento y las dos comisiones no se pierde más.
+     Se consigue comprando menos cantidad (el stop sigue donde lo pone el plan del agente), como se haría en real. */
+  const ML=S.settings.maxLoss;
+  if(ML>0){const lossAt=q=>q*stopDist+q*entry*slip+feeAmt(an.sym,q,entry,sh)+feeAmt(an.sym,q,sh?entry+stopDist:entry-stopDist,sh);
+    for(let i=0;i<4&&qty>0&&lossAt(qty)>ML;i++){const w=qty*ML/lossAt(qty)*.995;qty=wholeOnly(an.sym,sh)?Math.floor(w):rq(an.sym,w);}
+    if(!(qty>0)||lossAt(qty)>ML+1e-9||vet(an.sym,qty,entry))return {err:`con tu límite de pérdida de ${money(ML)} no llega al mínimo de orden del bróker (perdería ${money(lossAt(Math.max(qty,wholeOnly(an.sym,sh)?1:rq(an.sym,minNot(an.sym)*1.01/entry,true))))} si saltara el stop)`,lack};}
   const cost=qty*entry,f=feeAmt(an.sym,qty,entry,sh);
   if(cost+f>cash+1e-9)return {err:`efectivo disponible insuficiente (${money(cash)}${cash<a.cash-.005&&!isMix()?', el resto aún se está liquidando':''})`,lack};
   return {err:null,lack,qty,entry,cost,f,sh,stopDist};

@@ -122,7 +122,7 @@ function renderMode(){
   const cap=capV(),t=$('tMode');t.classList.toggle('on',!!cap);t.setAttribute('aria-expanded',String(modeOpen));
   $('tModeL').textContent=(cap?'Límite':'Modo')+' '+(modeOpen?'▴':'▾');$('tModeV').textContent=cap?'+'+money(cap):'Automático';
   const box=$('modeDrop');box.hidden=!modeOpen;if(!modeOpen)return;
-  const ae=document.activeElement;if(ae&&ae.id==='capIn2')return; /* no se redibuja mientras escribes */
+  const ae=document.activeElement;if(ae&&(ae.id==='capIn2'||ae.id==='mlIn'))return; /* no se redibuja mientras escribes */
   const lim=modeLim||!!cap,s=labSum('limit'),m=labSum('manual');
   const line=(t,x)=>x.n?`<div><b>${t}:</b> ${x.n} venta${x.n>1?'s':''}, <span class="${x.pnl>=0?'up':'down'}">${sgn(x.pnl)}</span>${x.done?` · en las ${x.done} ya comparadas: tú <span class="${x.you>=0?'up':'down'}">${sgn(x.you)}</span>, el plan del agente <span class="${x.plan>=0?'up':'down'}">${sgn(x.plan)}</span> → <b class="${x.diff>=0?'up':'down'}">${x.diff>=0?'ganas':'pierdes'} ${money(Math.abs(x.diff))}</b>`:''}${x.pend?` · ${x.pend} en seguimiento`:''}</div>`:'';
   box.innerHTML=`<div class="seg"><button class="btn" type="button" data-m="auto" aria-pressed="${!lim}">Automático</button><button class="btn" type="button" data-m="lim" aria-pressed="${lim}">Límite de ganancia</button></div>
@@ -130,6 +130,10 @@ function renderMode(){
     <div class="pre">${[.05,.1,.15,.2,.5,1].map(v=>`<button class="btn" type="button" data-v="${v}">${c2(v)}</button>`).join('')}</div>
     <p class="note" style="margin:8px 0 4px">${cap?`Cada operación se vende en cuanto deja <b>${money(cap)}</b> limpios (ya restadas las comisiones). El stop y el resto del agente siguen igual. Lo que gane por encima de su capital (${money(S.agents[0].initial)}) pasa a la cartera reservada, congelada.`:'Elige cuánto quieres ganar limpio por operación (puedes ajustarlo al céntimo con − y +).'}</p>`:
     '<p class="note" style="margin:0 0 4px">El agente compra y vende solo, con su plan, como hasta ahora.</p>'}
+    <div class="lab"><div class="lbl" style="margin-bottom:4px">Límite de pérdida por operación</div>
+      <div class="pre">${[null,1,2,3,5,10].map(v=>`<button class="btn" type="button" data-ml="${v==null?'':v}" aria-pressed="${(S.settings.maxLoss||null)===v}">${v==null?'Sin límite':c2(v)}</button>`).join('')}</div>
+      <div class="row" style="margin-top:6px;gap:6px"><input id="mlIn" type="number" inputmode="decimal" step="0.5" min="0.5" value="${S.settings.maxLoss?S.settings.maxLoss.toFixed(2):''}" placeholder="otra cantidad" aria-label="Pérdida máxima por operación en dólares" style="flex:1"><button class="btn" type="button" data-mlok="1">Poner</button></div>
+      <p class="note" style="margin:6px 0 0">${S.settings.maxLoss?`Ninguna operación perderá más de <b>${money(S.settings.maxLoss)}</b> si salta su stop, comisiones incluidas: compra menos cantidad para cumplirlo. Si el precio salta de golpe por encima del stop (una noticia, la apertura), en real se puede perder algo más: ningún bróker lo garantiza.`:'Cada operación arriesga lo que marca el plan del agente (hasta un 1 % del capital).'}</p></div>
     ${lim?'':`<label class="note" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 2px;cursor:pointer"><input type="checkbox" id="keepIn" ${S.settings.keepProfit?'checked':''} style="margin-top:3px"><span><b>Apartar el beneficio</b> también en Automático: lo que gane por encima de su capital (${money(S.agents[0].initial)}) se aparta y no se usa para operar. En real: en Binance pasa a tu cartera Funding; en IBKR se queda en la cuenta sin tocar.</span></label>`}
     ${(S.agents[0].vault||0)>=.005?`<div class="note" style="margin:6px 0 2px">🔒 <b style="color:var(--money)">Cartera reservada: ${money(S.agents[0].vault)}</b> · congelada, no se usa para operar. Cuenta en tu patrimonio total. <button class="btn" type="button" data-unv="1" style="padding:4px 10px;margin-left:4px">Liberar</button></div>`:''}
     ${(()=>{const cs=S.capStudy;if(!cs)return '<div class="lab"><div class="lbl">Estudio de variantes</div><div class="note">En cuanto haya velas suficientes, la app probará varios límites sobre el mercado real reciente y te dirá cuál habría funcionado mejor.</div></div>';
@@ -146,6 +150,8 @@ $('tMode').addEventListener('click',()=>{modeOpen=!modeOpen;if(!modeOpen)modeLim
 async function setCap(v){const r=await act('mode',{cap:v});if(!r.ok)alert(r.msg);modeLim=v!=null;renderMode();}
 $('modeDrop').addEventListener('click',async e=>{
   const b=e.target.closest&&e.target.closest('button');if(!b)return;
+  if(b.dataset.ml!=null){const r=await act('maxloss',{v:b.dataset.ml});if(r&&!r.ok)alert(r.msg);renderMode();return;}
+  if(b.dataset.mlok){const v=parseFloat(String(($('mlIn')||{}).value||'').replace(',','.'));const r=await act('maxloss',{v:v>0?v:null});if(r&&!r.ok)alert(r.msg);renderMode();return;}
   if(b.dataset.unv){const v=S.agents[0].vault||0;if(!confirm(`¿Devolver los ${money(v)} reservados al capital del agente? Podrá operar con ellos (y también perderlos). Tu patrimonio total no cambia.`))return;const r=await act('unvault',{});if(!r.ok)alert(r.msg);renderMode();updateHero();return;}
   if(b.dataset.m==='auto'){modeLim=false;setCap(null);return;}
   if(b.dataset.m==='lim'){modeLim=true;renderMode();const i=$('capIn2');if(i&&!capV())i.focus();return;}

@@ -657,7 +657,8 @@ function benchTick(){
   if(typeof S==='undefined'||!S||!S.agents)return;bmFetch();
   const q=bmQ(),b=bmB();let B=S.bench;
   if(!B||B.started!==(S.startedAt||B.started)){if(q&&b)bmStart(q,b);return;}
-  if(!b)return;const now=Date.now(),qn=q&&sessOpen('us',now)?q:B.last.q;
+  if(!b)return;if(!B.fx0&&BMX.fx)B.fx0=BMX.fx; /* el cambio euro/dólar puede llegar unos segundos después del inicio */
+  const now=Date.now(),qn=q&&sessOpen('us',now)?q:B.last.q;
   /* Mismo riesgo: crece con lo que el bot tenía invertido en cada mercado desde la última revisión */
   const dq=qn/B.last.q-1,db=b/B.last.b-1,gS=B.rk*B.last.eS*dq,gC=B.rk*B.last.eC*db;B.rkS+=gS;B.rkC+=gC;B.rk+=gS+gC;
   const tot=bmTot(),e=bmExp(tot),dt=Math.min(now-B.last.t,6*3600e3);B.exp.t+=dt;B.exp.s+=B.last.eS*dt;B.exp.c+=B.last.eC*dt;

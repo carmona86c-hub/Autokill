@@ -53,6 +53,15 @@ function applyCmd(c,a){
     case 'msg':{const ch=kid();if(!ch)return no('No hay hijos.');const par=agentById(ch.parentId);const e=par?sendMsg(par,ch,a.text):'sin padre';if(!e)readInbox(ch);return e?no('No enviado: '+e+'.'):ok(`Mensaje entregado a ${ch.name}.`);}
     case 'verify':{const ch=kid();if(!ch)return no('No hay hijos.');const v=verifyConst(ch);if(!v&&ch.status==='alive')kill(ch,'constitución alterada: el hijo se apaga por seguridad');
       return ok(v?`Constitución de ${ch.name} verificada: huella ${ch.constHash} idéntica a la del original.`:`La constitución de ${ch.name} no coincide${ch.status!=='dead'?'; se ha apagado por seguridad':''}.`);}
+    case 'retire':{const c=agentById(+a.id);if(!c||c.parentId==null)return no('Solo se pueden retirar hijos, no el agente original.');
+      if(c.status==='dead'){const n=pruneDead(true);return ok(n?'Retirado; su dinero volvió al padre.':'Ya estaba retirado.');}
+      /* antes de retirarlo se venden sus posiciones (como en real): si alguna no se puede vender ahora, no se retira */
+      const stuck=c.positions.filter(p=>!sessOpen(sessOf(p.sym),Date.now())||!pxFresh(p.sym,90000));
+      if(stuck.length)return no(`No se puede retirar ahora: ${stuck.map(p=>base(p.sym)).join(', ')} no se puede${stuck.length>1?'n':''} vender (mercado cerrado o sin precio). Inténtalo cuando abra.`);
+      const n0=c.positions.length;c.positions.slice().forEach(p=>closePos(c,p,'hijo retirado',undefined,'manual'));
+      kidsOf(c).forEach(k=>{k.parentId=c.parentId;});
+      kill(c,'retirado por ti');const par=agentById(c.parentId);const back=c.cash+(c.reserve||0);pruneDead(true);
+      return ok(`${c.name} retirado${n0?` (vendidas ${n0} posiciones)`:''}: ${money(back)} vuelven a ${par?par.name:'el agente original'}.`);}
     case 'prune':{const n=pruneDead(true);return ok(n?`${n} hijo(s) retirado(s); su dinero volvió al capital del padre.`:'No hay hijos muertos sin posiciones que retirar.');}
     case 'possell':{let ag=null,p=null;S.agents.forEach(x=>x.positions.forEach(q=>{if(q.sym===a.sym&&String(q.openedAt)===String(a.t)){ag=x;p=q;}}));
       if(!p)return no('Esa posición ya no está abierta.');

@@ -393,6 +393,11 @@ function drawChart(a){
   g.fillStyle=col('--mute');g.textAlign='left';g.fillText(tf(t0),40,h-4);g.textAlign='right';g.fillText(tf(t1),w-10,h-4);
 }
 function syncSel(el,opts){const sig=opts.map(o=>o[0]+'|'+o[1]).join(';');if(el.dataset.sig===sig)return;const cur=el.value;el.dataset.sig=sig;el.innerHTML=opts.map(([v,l])=>`<option value="${esc(String(v))}">${esc(l)}</option>`).join('');if(opts.some(o=>String(o[0])===cur))el.value=cur;}
+/* retirar un hijo: dos toques para confirmar; vende sus posiciones y su dinero vuelve al padre */
+var retArm=null,retT=0;
+if(typeof document!=='undefined')document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('button[data-retire]');if(!b)return;
+  const id=+b.dataset.retire;if(retArm!==id||Date.now()-retT>5000){retArm=id;retT=Date.now();b.textContent='¿Seguro? Toca otra vez para retirarlo';return;}
+  retArm=null;b.disabled=true;b.textContent='Retirando…';const r=await act('retire',{id});b.disabled=false;b.textContent=r&&r.msg?r.msg:'Hecho.';setTimeout(()=>{try{render();}catch(x){}},1500);});
 function renderLin(){
   $('cHash').textContent=CONST_HASH;if(!$('cText').textContent)$('cText').textContent=CONSTITUTION;
   if($('gSpec').options.length<2)$('gSpec').insertAdjacentHTML('beforeend',SPECS.map(x=>`<option>${x}</option>`).join(''));
@@ -411,7 +416,8 @@ function renderLin(){
     ${a.genesis&&a.genesis.msg?`<div class="note" style="margin-top:6px">Génesis: «${esc(a.genesis.msg)}»</div>`:''}
     <div class="note" style="margin-top:8px;font-family:var(--mono)">EMA ${a.params.emaF}/${a.params.emaS} · riesgo ${(a.params.riskPct*100).toFixed(2)}% · stop ${(+a.params.stopATR).toFixed(2)}×ATR · objetivo ${(+a.params.tpATR).toFixed(2)}×ATR · RSI ${Math.round(a.params.rsiMin)}–${Math.round(a.params.rsiMax)}</div>
     ${ev&&a.parentId!=null?`<details style="margin-top:8px"><summary class="note" style="cursor:pointer">Ciclo de vida</summary><div class="note" style="font-size:12px;margin-top:4px">${ev}</div></details>`:''}
-    ${ib?`<details style="margin-top:6px"><summary class="note" style="cursor:pointer">Buzón (${(a.inbox||[]).length})</summary><div class="note" style="font-size:12px;margin-top:4px">${ib}</div></details>`:''}</div>`;}).join('');
+    ${ib?`<details style="margin-top:6px"><summary class="note" style="cursor:pointer">Buzón (${(a.inbox||[]).length})</summary><div class="note" style="font-size:12px;margin-top:4px">${ib}</div></details>`:''}
+    ${a.parentId!=null&&a.status!=='dead'?`<button class="btn" type="button" data-retire="${a.id}" style="width:100%;margin-top:10px">${retArm===a.id&&Date.now()-retT<5000?'¿Seguro? Toca otra vez para retirarlo':`Retirar este hijo${a.positions.length?` (vende sus ${a.positions.length} posiciones)`:''} y devolver su dinero`}</button>`:''}</div>`;}).join('');
   const g=S.graveyard||[];$('cemCard').hidden=!g.length;
   if(g.length)$('cemList').innerHTML=`<table><thead><tr><th>Hijo</th><th>Gen.</th><th>Especialidad</th><th>Vivió</th><th>Ops</th><th>Resultado</th><th>Devuelto</th></tr></thead><tbody>${g.map(d=>`<tr><td>${esc(d.name)}</td><td>${d.gen}</td><td>${esc(d.spec||'Todo')}</td><td>${clock(d.born)} – ${d.died?clock(d.died):'—'}</td><td>${d.trades}</td><td class="${d.pnl>=0?'up':'down'}">${money(d.pnl)}</td><td>${money(d.returned)}</td></tr>`).join('')}</tbody></table>`;
 }

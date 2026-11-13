@@ -21,6 +21,7 @@ function migrate(s){
   if(!s.settings.exitV2){s.settings.exitV2=1;s.agents.forEach(a=>{if(a.params)a.params.trailATR=Math.max(2,+a.params.trailATR||0);});}
   /* criptomonedas en Binance Futuros (una sola vez): la experiencia de cada cripto pasa a su contrato */
   /* broker IBKR (una sola vez): la simulación sigue sus comisiones, mercados y reglas */
+  if(s.settings.bnbV1===undefined){s.settings.bnbV1=1;s.settings.bnbFee=true;}
   if(s.settings.broker===undefined){s.settings.broker='ibkr';s.settings.ibPlan='tiered';}
   /* IBKR + Binance (una sola vez): lo que ya estaba abierto se compró en IBKR y ahí sigue */
   if(!s.settings.mixV1){s.settings.mixV1=1;if(s.settings.broker==='ibkr'){s.settings.broker='mix';s.settings.split=.7;s.agents.forEach(a=>{a.vr={IB:0,BN:0};(a.positions||[]).forEach(p=>{p.ven='IB';});});s.route=null;(s.log=s.log||[]).unshift({t:Date.now(),a:'Sistema',type:'info',msg:'Bróker: IBKR + Binance. Acciones, ETF y divisas siguen en IBKR; cada orden de cripto va al más barato. Saldo repartido 70 % IBKR / 30 % Binance para empezar; la app recomendará el reparto con los datos (Estadísticas → Reparto entre brókers).'});}}
@@ -220,7 +221,8 @@ function ibOK(k){const m=metaOf(k)||{},c=catOf(k);if(c==='Cripto')return isMix()
   return !['hk','krx','shanghai'].includes(m.sess);}
 const IB_MARGIN=2000;
 const marginOK=()=>S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0)*(isMix()?splitIB():1)>=IB_MARGIN;
-const feeRate0=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1);
+/* Binance contado con «pagar comisiones con BNB»: 25 % menos (0,10 % → 0,075 %). En real hay que tener algo de BNB en la cuenta y la opción activada en Binance. */
+const feeRate0=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1)*(srcOf(k)==='BN'&&S.settings.bnbFee?.75:1);
 /* comisión real en dólares de una orden: q unidades a price; sell=true si la orden vende */
 function feeAmt(k,q,price,sell){
   const V=q*price;if(!(V>0))return 0;

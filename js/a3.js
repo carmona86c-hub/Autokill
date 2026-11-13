@@ -482,15 +482,19 @@ function protReport(){
    (al menos 40 casos y t ≥ 2,5), actúa: bloquea los tipos de señal que pierden y apaga los filtros que están quitando operaciones buenas. */
 const SIG_MAX=1500,SIG_N=40,SIG_T=2.5;
 /* orden fijo de las características: cada ficha las guarda como lista para ocupar poco */
-const SIG_FK=['lado','mercado','velas','mercado y lado','puntuación','RSI','ruptura','volumen','eficiencia','nerviosismo','volatilidad (ATR %)','tendencia 1 h','últimas 24 h','últimos 5 días','fuerza frente a su mercado (4 h)','fuerza frente a su mercado (24 h)','tendencia de su mercado','hora','día','experiencia'];
+const SIG_FK=['lado','mercado','velas','mercado y lado','puntuación','RSI','ruptura','volumen','eficiencia','nerviosismo','volatilidad (ATR %)','tendencia 1 h','últimas 24 h','últimos 5 días','fuerza frente a su mercado (4 h)','fuerza frente a su mercado (24 h)','tendencia de su mercado','hora','día','experiencia','tendencia de fondo bitcoin','tendencia de fondo Nasdaq'];
 const sigOf=()=>S.sig||(S.sig={list:[],open:[],sum:null,act:{block:{},off:{}},at:0,sumAt:0});
 const ret1h=(k,n)=>{const c=kOf('1h',k);if(!c||c.length<=n)return null;return c[c.length-1].c/c[c.length-1-n].c-1;};
 const refOf=k=>catOf(k)==='Cripto'&&!isBS(k)?uni().find(x=>catOf(x)==='Cripto'&&base(x)==='BTC'):(isStk(k)||isBS(k))?(ndxC.k||uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(base(x).toUpperCase()))):null;
 const band=(v,cuts,labs)=>{if(v==null||!isFinite(v))return 'sin dato';for(let i=0;i<cuts.length;i++)if(v<cuts[i])return labs[i];return labs[labs.length-1];};
+/* tendencia de fondo: el precio frente a su media de unos 30 días (720 velas de 1 h). Solo se mide; el laboratorio decidirá si conviene filtrar por ella */
+function bgTrend(k){const c=k&&kOf('1h',k);if(!c||c.length<720)return 'sin dato';const w=c.slice(-720),m=w.reduce((t,x)=>t+x.c,0)/w.length,p=c[c.length-1].c;return p>m*1.01?'por encima de su media de 30 días':p<m*.99?'por debajo de su media de 30 días':'en su media de 30 días';}
 function sigFeat(a,an,P){
   const k=an.sym,sh=an.side==='short',d=sh?-1:1,c=kOf(an.tf,k)||[],n=c.length-1,f={};
   f.lado=sh?'a la baja':'al alza';f.mercado=grpOf(k);f.velas=an.tf;f['mercado y lado']=grpOf(k)+' '+f.lado;
   f.puntuación=band(an.score,[60,70,80,90],['<60','60-69','70-79','80-89','90+']);
+  {const btc=uni().find(x=>catOf(x)==='Cripto'&&!isBS(x)&&base(x)==='BTC'),q=(typeof bmQKey==='function'&&bmQKey())||uni().find(x=>['QQQ','XYZ100','US100','NAS100','USTECH'].includes(String(base(x)).toUpperCase()));
+   f['tendencia de fondo bitcoin']=bgTrend(btc);f['tendencia de fondo Nasdaq']=bgTrend(q);}
   f.RSI=band(sh?100-an.rsi:an.rsi,[45,55,65,75],['<45','45-54','55-64','65-74','75+']);
   if(n>21){const w=c.slice(n-20,n),hi=Math.max(...w.map(x=>x.h)),lo=Math.min(...w.map(x=>x.l)),va=w.reduce((t,x)=>t+x.v,0)/20;
     f.ruptura=(sh?c[n].c<lo:c[n].c>hi)?'sí':'no';f.volumen=band(va>0?c[n].v/va:null,[.7,1.3,2],['bajo','normal','alto','muy alto']);}
@@ -559,7 +563,7 @@ function sigAnalyze(){
    Las que se rechazan por calidad (sin tendencia, sin recorrido para cubrir costes…) no sirven para juzgar: casi siempre pierden. */
 const SIG_OK=new Set(['apta: entra','bloqueado por el laboratorio','límite de posiciones','ya en cartera','demasiadas criptos en la misma dirección','capital insuficiente','efectivo pendiente de liquidar o insuficiente']);
 const SIG_MAXBLOCK=6;
-const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tendencia 1 h','últimos 5 días','fuerza frente a su mercado (24 h)','volatilidad (ATR %)'];
+const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tendencia 1 h','últimos 5 días','fuerza frente a su mercado (24 h)','volatilidad (ATR %)','tendencia de fondo bitcoin','tendencia de fondo Nasdaq'];
 const SIG_FILTERS=['mercado de lado','contra la tendencia del Nasdaq','primeros 15 min de bolsa','día de noticias'];
 /* las señales de un mismo rato se parecen mucho entre sí: 100 señales de una tarde de caídas no son 100 pruebas independientes.
    Para actuar, los casos tienen que venir de al menos 3 días distintos y ningún día puede aportar más de la mitad. */
@@ -830,3 +834,31 @@ function benchLate(){
 }
 if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('DOMContentLoaded',benchLate);
 {const s1=sigTick;sigTick=function(){benchLate();return s1();};}
+
+/* ======================================================================================
+   PRUEBA DE MARCOS: ¿con qué velas gana más la estrategia, ya pagadas las comisiones?
+   Cada día se simula la estrategia actual (mismas reglas de entrada y salida, mismos costes reales) sobre las velas reales
+   de 5 min, 15 min, 1 h y 4 h (estas, juntando velas de 1 h) de todos los activos vigilados. Solo informa: no cambia nada solo.
+   ====================================================================================== */
+function agg4h(c){const out=[];let cur=null;for(const x of c){const b=Math.floor(x.t/144e5)*144e5;if(!cur||cur.t!==b){if(cur)out.push(cur);cur={t:b,o:x.o,h:x.h,l:x.l,c:x.c,v:x.v};}else{cur.h=Math.max(cur.h,x.h);cur.l=Math.min(cur.l,x.l);cur.c=x.c;cur.v+=x.v;}}if(cur)out.push(cur);return out;}
+function tfCompare(){
+  const P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,res={};
+  for(const tf of ['5m','15m','1h','4h']){let n=0,w=0,sumR=0,imp=0,t0=Infinity,t1=0,ns=0;
+    for(const k of uni()){let c=tf==='4h'?kOf('1h',k):kOf(tf,k);if(!c||c.length<120)continue;if(tf==='4h')c=agg4h(c);if(c.length<80)continue;
+      ns++;const tr=simCore(serie(c),P,60,c.length,costOf(k),false);t0=Math.min(t0,c[60].t);t1=Math.max(t1,c[c.length-1].t);
+      for(const x of tr){n++;if(x.r>0)w++;sumR+=x.r;imp+=x.r*(x.sz||0);}}
+    const days=t1>t0?(t1-t0)/864e5:0;res[tf]={n,win:n?w/n:0,avg:n?sumR/n:0,per30:days>0&&ns?imp/ns/days*30:0,days:+days.toFixed(1),assets:ns};} /* per30: lo que daría operando un solo activo con ese marco, cada 30 días */
+  const G=S.tfcmp||(S.tfcmp={hist:[]});G.last={t:Date.now(),res};G.hist.unshift({t:Date.now(),res});G.hist.length=Math.min(G.hist.length,30);
+  /* media de todos los días medidos: con el paso de los días la comparación se vuelve fiable */
+  const avg={};for(const tf of ['5m','15m','1h','4h']){const v=G.hist.map(h=>h.res[tf]).filter(Boolean);avg[tf]={days:G.hist.length,n:v.reduce((t,x)=>t+x.n,0),avg:v.length?v.reduce((t,x)=>t+x.avg,0)/v.length:0,per30:v.length?v.reduce((t,x)=>t+x.per30,0)/v.length:0,win:v.length?v.reduce((t,x)=>t+x.win,0)/v.length:0};}
+  G.avg=avg;return G;
+}
+function tfText(){const G=S.tfcmp;if(!G||!G.avg)return 'aún sin medir (se calcula una vez al día).';const L=['5m','15m','1h','4h'],lab={'5m':'5 min','15m':'15 min','1h':'1 hora','4h':'4 horas'};
+  const best=L.slice().sort((x,y)=>G.avg[y].per30-G.avg[x].per30)[0];
+  return L.map(tf=>`${lab[tf]}: ${G.avg[tf].n} op., media ${bmPct(G.avg[tf].avg,2)} por operación, ${bmPct(G.avg[tf].per30,2)} cada 30 días por activo`).join(' · ')+` — mejor hasta ahora: ${lab[best]} (${G.hist.length} día${G.hist.length===1?'':'s'} medidos${G.hist.length<10?'; aún pocos para decidir':''}).`;}
+{const p1=protReport;protReport=function(){return p1.apply(this,arguments)+`\nPRUEBA DE MARCOS (estrategia actual con costes reales, sobre velas reales):\n  ${tfText()}\n`;};}
+{const b1=benchCard;benchCard=function(){b1.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.appendChild)return;let el=document.getElementById('tfCmp');if(!el){el=document.createElement('div');el.id='tfCmp';}box.appendChild(el);
+  const G=S.tfcmp;if(!G||!G.avg){el.innerHTML='<p class="note" style="margin:8px 0 0"><b>Prueba de marcos:</b> se calcula una vez al día.</p>';return;}
+  const lab={'5m':'5 min','15m':'15 min','1h':'1 hora','4h':'4 horas'};
+  el.innerHTML=`<div class="lbl" style="margin-top:10px">Prueba de marcos: ¿con qué velas gana más?</div><div class="tw"><table><tr><th>Velas</th><th>Op.</th><th>Ganadas</th><th>Media por op.</th><th>Cada 30 días por activo</th></tr>${['5m','15m','1h','4h'].map(tf=>{const x=G.avg[tf];return `<tr><td>${lab[tf]}</td><td>${x.n}</td><td>${Math.round(x.win*100)} %</td><td class="${x.avg>=0?'up':'down'}">${bmPct(x.avg,2)}</td><td class="${x.per30>=0?'up':'down'}">${bmPct(x.per30,2)}</td></tr>`;}).join('')}</table></div><p class="note" style="margin:4px 0 0">La estrategia actual simulada sobre velas reales, con comisiones y deslizamiento. Media de ${G.hist.length} día${G.hist.length===1?'':'s'}${G.hist.length<10?': aún pocos para decidir':''}. Solo informa; el cambio de velas lo decides tú en Ajustes.</p>`;}catch(e){}};}
+{const t1=benchTick;benchTick=function(){t1.apply(this,arguments);try{const G=S.tfcmp,now=Date.now();if((!G||!G.last||now-G.last.t>20*3600e3)&&uni().length>=5&&(market.k['1h']&&Object.keys(market.k['1h']).length>=5))tfCompare();}catch(e){}};}

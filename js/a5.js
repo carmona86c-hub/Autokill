@@ -243,7 +243,7 @@ $('srvWake').addEventListener('click',async()=>{
 });
 function render(){
   updateHero();renderBan();renderSrv();
-  if(tab==='panel')renderPanel();else if(tab==='log')renderLog();else if(tab==='stats')renderStats();else if(tab==='lin')renderLin();else if(tab==='set'&&REM.on)renderRem();
+  if(tab==='panel')renderPanel();else if(tab==='log')renderLog();else if(tab==='stats')renderStats();else if(tab==='lin')renderLin();else if(tab==='mkt'&&typeof renderMkt==='function')renderMkt();else if(tab==='set'&&REM.on)renderRem();
 }
 function show(t){
   tab=t;document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='s-'+t));

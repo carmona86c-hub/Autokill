@@ -178,14 +178,14 @@ function renderPanel(){
       <div class="sub"><span>stop ${px(p.stop)}</span><span>${px(price)}</span><span>objetivo ${px(p.tp)}</span></div>
       <div class="sub"><span>${money(p.basis)} invertidos</span><span>entrada ${px(p.entry)}</span><span>velas ${p.tf||S.settings.tf}</span></div>
       <div class="sub" style="color:var(--fg)"><span>Si se vende ahora, te queda limpio${capV()?' · vende a +'+money(capV()):''}</span><b class="${net>=0?'up':'down'}">${sgn(net)}</b></div>
-      <div class="row" style="margin-top:8px"><button class="btn" type="button" data-sell="${key}" style="width:100%">${sellArm===key.replace(/&amp;/g,'&')&&Date.now()-sellT<5000?'¿Seguro? Toca otra vez para vender':`Vender ahora (${sgn(net)} limpios)`}</button></div></div>`:''}</div>`;}).join(''):
+      <div class="row" style="margin-top:8px"><button class="btn" type="button" data-chart="${esc(p.sym)}" style="width:100%">Ver gráfico completo</button></div><div class="row" style="margin-top:8px"><button class="btn" type="button" data-sell="${key}" style="width:100%">${sellArm===key.replace(/&amp;/g,'&')&&Date.now()-sellT<5000?'¿Seguro? Toca otra vez para vender':`Vender ahora (${sgn(net)} limpios)`}</button></div></div>`:''}</div>`;}).join(''):
     '<div class="empty">Sin posiciones. El agente espera una señal que supere sus filtros.</div>';
   const find=k=>{const i=k.lastIndexOf('|'),sym=k.slice(0,i).replace(/&amp;/g,'&'),t=k.slice(i+1);const it=items.find(([,p])=>p.sym===sym&&String(p.openedAt)===t);return it&&it[1];};
   document.querySelectorAll('#posList canvas.spark').forEach(cv=>{const p=find(cv.dataset.k);if(p)drawSpark(cv,p);});
   document.querySelectorAll('#posList canvas.pchart').forEach(cv=>{const p=find(cv.dataset.k);if(p)drawPos(cv,p);});}
   renderMarkets();renderQuotes();
   const mp=S.agents[0].params.minScore;
-  $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
+  $('radar').innerHTML=ui.radar.length?ui.radar.map(r=>`<div class="radar" data-chart="${esc(r.sym)}" title="Ver gráfico"><span title="${catOf(r.sym)}">${esc(base(r.sym))}<small>${catOf(r.sym)} · ${r.tf} · ${r.side==='short'?'baja':'alza'}${(()=>{const f=krOn()&&krOf(r.sym,r.tf);return f?' · IA '+pct(f.ret,2):'';})()}</small></span><span class="meter ${r.score>=mp?'hot':''}"><i style="width:${r.score}%"></i></span><span>${r.score}</span></div>`).join(''):'<div class="empty">Esperando la primera vela…</div>';
   $('scanInfo').textContent=ui.scanAt?`${ui.summary}.${ui.reasons?' Por qué no compra el resto: '+ui.reasons+'.':''} Última evaluación ${clock(ui.scanAt)}.`:(market.err?`Sin conexión con el mercado (${market.err}). Reintentando.`:'Conectando con el mercado real…');
 }
 /* gráfico real de cada posición: velas del activo en su escala, con la entrada, el stop y el objetivo */

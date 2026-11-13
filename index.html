@@ -74,7 +74,7 @@ header{padding-top:max(10px,env(safe-area-inset-top,0px));padding-bottom:10px;bo
 @media (max-width:420px){.dkv{grid-template-columns:auto 1fr}}
 .tile b{display:block;font:600 15px var(--mono);margin-top:2px;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 main{padding-top:14px;padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))}
-nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--bg);display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin:0 auto;padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px));padding-bottom:env(safe-area-inset-bottom,0px)}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--bg);display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--line);margin:0 auto;padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px));padding-bottom:env(safe-area-inset-bottom,0px)}
 nav button{background:none;border:0;padding:12px 2px;font:600 12px var(--ui);color:var(--mute);border-top:2px solid transparent;margin-top:-1px;cursor:pointer}
 nav button[aria-selected=true]{color:var(--fg);border-top-color:var(--money)}
 nav button:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--info);outline-offset:2px}
@@ -142,6 +142,44 @@ summary{list-style-position:inside}
 .ban{border:1px solid var(--down);background:var(--panel);border-radius:10px;padding:12px;margin-bottom:14px;display:grid;gap:8px}
 .ban[hidden]{display:none}.ban b{color:var(--down)}.ban p{margin:0}
 @media (min-width:700px){main,header>*,nav{max-width:760px;width:100%;margin-left:auto;margin-right:auto}}
+
+/* Mercados: watchlist global y ficha con gráfico de cada activo */
+nav button{font-size:11.5px}
+.mksg{display:grid;gap:2px}
+.mks1{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:4px 0;font-size:13px}
+.mks1 .note{text-align:right;font-size:12px}.mksn small{color:var(--mute);font-size:11px;margin-left:6px}
+.mvw{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mvc{display:grid;gap:4px;align-content:start}
+.mv{display:flex;justify-content:space-between;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:600 12.5px var(--mono);cursor:pointer;min-width:0}
+.mv b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mkc{border:1px solid transparent;cursor:pointer}.mkc[aria-pressed=true]{border-color:var(--money);color:var(--fg)}
+.mrow{display:grid;grid-template-columns:minmax(0,1fr) auto 72px;gap:10px;align-items:center;width:100%;background:none;border:0;border-top:1px solid var(--line);padding:9px 0;text-align:left;cursor:pointer}
+.mrow:first-child{border-top:0}
+.mn{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn small{display:flex;align-items:center;gap:5px;font:11px var(--ui);color:var(--mute);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn small .dot{flex:0 0 auto;width:6px;height:6px}
+.mp{font:600 13.5px var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.mc{font:600 12px var(--mono);text-align:right;padding:3px 6px;border-radius:6px;background:var(--chip)}
+.radar[data-chart]{cursor:pointer}
+body.mkopen{overflow:hidden}
+.sheet{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:max(10px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.sheet[hidden]{display:none}
+.shtop{display:flex;align-items:center;gap:12px}.shtop .btn{padding:7px 12px}
+.shtop h3{margin:0;font:700 20px var(--ui);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shtop h3 small{font:500 12px var(--ui);color:var(--mute);margin-left:8px}
+.shpx{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.shpx .big{font-size:clamp(26px,8vw,36px)}
+.tfs{display:flex;gap:4px;overflow-x:auto}.tfs .btn{padding:6px 9px;font:600 12px var(--mono);white-space:nowrap}.tfs .btn[aria-pressed=true]{background:var(--money);border-color:var(--money);color:var(--bg)}
+.zb{padding:6px 11px;font:700 15px var(--mono)}
+canvas.mkc1{height:300px;margin-top:10px;touch-action:pan-y}canvas.mkc2{height:72px;margin-top:4px;touch-action:pan-y}
+.rd{font:11.5px var(--mono);color:var(--mute);margin-top:6px;min-height:32px;line-height:1.5}.rd b{color:var(--fg);font-weight:600}
+.anh{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:end}
+.ansc{font:600 34px/1 var(--mono)}.ansc small{font:500 11px var(--ui);color:var(--mute);margin-left:6px}
+.anb .meter{margin-top:4px}
+.fac{list-style:none;margin:6px 0 8px;padding:0;display:grid;gap:4px;font-size:13px}
+.fac li{display:grid;grid-template-columns:16px 1fr;gap:6px;color:var(--mute)}.fac li.ok{color:var(--fg)}.fac li.ok>span:first-child{color:var(--up);font-weight:700}
+.fac b{font:600 11px var(--mono);color:var(--mute);margin-left:4px}
+.interp{margin:10px 0 0;padding:10px;border-radius:8px;background:var(--bg);border-left:3px solid var(--line);font-size:13px}
+.interp.up{border-left-color:var(--up)}.interp.down{border-left-color:var(--down)}
+.empty{color:var(--mute);font-size:13px;padding:6px 0}
 </style>
 </head>
 <body>
@@ -203,6 +241,15 @@ summary{list-style-position:inside}
       <details id="quotesBox" style="margin-top:10px"><summary class="lbl" style="cursor:pointer">Cotizaciones recibidas</summary><div id="quotes" class="tw"></div></details>
     </div>
     <div class="card"><h2>Radar del mercado</h2><div id="radar"></div><p id="scanInfo" class="note" style="margin:8px 0 0"></p></div>
+  </section>
+
+  <section id="s-mkt">
+    <div class="card"><h2>Horario por región</h2><div id="mkSess" class="mksg"></div></div>
+    <div class="card"><h2>Mayores movimientos · 24 h</h2><div id="mkMov" class="mvw"></div></div>
+    <div class="card"><h2>Watchlist global</h2>
+      <div class="row"><input id="mkQ" type="search" placeholder="Buscar: bitcoin, tesla, oro…" aria-label="Buscar activo" autocomplete="off" style="flex:1 1 160px"><select id="mkSort" aria-label="Ordenar" style="flex:0 0 auto;width:auto"><option value="vol">Más volumen</option><option value="up">Suben más</option><option value="down">Bajan más</option><option value="az">A–Z</option></select></div>
+      <div id="mkCats" class="mks" style="margin:10px 0 4px"></div>
+      <div id="mkList"></div><p id="mkInfo" class="note" style="margin:8px 0 0"></p></div>
   </section>
 
   <section id="s-log"><div class="card"><h2>Registro de decisiones</h2><div id="logList"></div></div></section>
@@ -353,8 +400,23 @@ summary{list-style-position:inside}
   </section>
 </main>
 
+<div id="mkSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="mkTitle">
+  <div class="shtop"><button id="mkBack" class="btn" type="button" aria-label="Volver a mercados">‹ Mercados</button><h3 id="mkTitle"></h3></div>
+  <div id="mkPrice" class="shpx"></div>
+  <div id="mkMeta" class="mks" style="margin:6px 0 10px"></div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div id="mkTf" class="tfs"></div><div class="row" style="flex-wrap:nowrap;gap:4px"><button id="mkZin" class="btn zb" type="button" aria-label="Acercar">+</button><button id="mkZout" class="btn zb" type="button" aria-label="Alejar">−</button></div></div>
+    <canvas id="mkC" class="mkc1" aria-label="Gráfico de velas"></canvas>
+    <canvas id="mkR" class="mkc2" aria-label="RSI"></canvas>
+    <div id="mkRd" class="rd"></div>
+  </div>
+  <div class="card"><h2>Motor del agente · análisis</h2><div id="mkAn"></div></div>
+  <div class="card"><h2>Tu agente con este activo</h2><div id="mkMine"></div></div>
+</div>
+
 <nav role="tablist">
   <button type="button" role="tab" data-t="panel" aria-selected="true">Panel</button>
+  <button type="button" role="tab" data-t="mkt" aria-selected="false">Mercados</button>
   <button type="button" role="tab" data-t="log" aria-selected="false">Registro</button>
   <button type="button" role="tab" data-t="stats" aria-selected="false">Estadísticas</button>
   <button type="button" role="tab" data-t="lin" aria-selected="false">Linaje</button>
@@ -366,6 +428,7 @@ summary{list-style-position:inside}
 <script src="js/a3.js"></script>
 <script src="js/a4.js"></script>
 <script src="js/a5.js"></script>
+<script src="js/a6.js"></script>
 <script>/* al cambiar de pestaña, se vuelve arriba */document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{try{window.scrollTo(0,0);}catch(e){}}));</script>
 </body>
 </html>

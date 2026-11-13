@@ -32,6 +32,30 @@ MAX_SERIES, MAX_SAMPLES, MAX_PRED, MIN_LEN, MAX_LEN = 8, 8, 24, 60, 300
 state = {"ready": False, "error": None, "loaded_at": None, "model": MODEL, "calls": 0, "last_ms": None, "fake": FAKE}
 predictor = None
 infer_lock = threading.Lock()
+STARTED = time.time()
+
+
+def _low_priority():
+    # Kronos usa mucha CPU y el plan gratuito tiene muy poca: su hilo va con prioridad mínima para que el agente
+    # (Node) y las respuestas a la app pasen siempre por delante; Kronos solo usa la CPU que sobra.
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+    except Exception:
+        pass
+
+
+import concurrent.futures  # noqa: E402
+KR_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1, initializer=_low_priority, thread_name_prefix="kronos")
+
+
+def _rss_mb():
+    try:
+        with open("/proc/self/status") as f:
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    return int(ln.split()[1]) // 1024
+    except Exception:
+        return None
 
 
 class FakePredictor:
@@ -50,6 +74,7 @@ class FakePredictor:
 
 def load():
     global predictor
+    _low_priority()  # cargar el modelo también va detrás del agente
     try:
         if FAKE:
             predictor = FakePredictor()
@@ -169,8 +194,9 @@ def _forecast(items, pred_len, samples):
 
 async def home(request: Request):
     p = AG["proc"]
-    return JSONResponse({"service": "automaton-kronos", **state,
-                         "agent": {"running": bool(p and p.poll() is None), "restarts": AG["restarts"]}})
+    return JSONResponse({"service": "automaton-kronos", **state, "uptime_s": int(time.time() - STARTED), "rss_mb": _rss_mb(),
+                         "agent": {"running": bool(p and p.poll() is None), "restarts": AG["restarts"],
+                                   "up_s": int(time.time() - AG["started"]) if AG["started"] else None}})
 
 
 async def forecast(request: Request):
@@ -193,7 +219,8 @@ async def forecast(request: Request):
             return _forecast(items, pred_len, samples)
 
     try:
-        res = await run_in_threadpool(run)
+        import asyncio
+        res = await asyncio.get_running_loop().run_in_executor(KR_POOL, run)
     except Exception as e:
         return JSONResponse({"error": repr(e)}, status_code=500)
     ms = int((time.time() - t0) * 1000)

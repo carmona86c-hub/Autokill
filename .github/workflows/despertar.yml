@@ -14,7 +14,7 @@ jobs:
       - name: Visitar el servidor
         run: |
           for i in 1 2 3; do
-            curl -fsS -m 60 https://autokill.onrender.com/agent/health && exit 0
+            if curl -fsS -m 60 https://autokill.onrender.com/agent/health; then echo; curl -sS -m 30 -o /dev/null -w "tiempo de respuesta de la app: %{time_total} s\n" https://autokill.onrender.com/agent/health; curl -sS -m 30 https://autokill.onrender.com/ || true; exit 0; fi
             sleep 20
           done
           curl -fsS -m 90 https://autokill.onrender.com/ || true

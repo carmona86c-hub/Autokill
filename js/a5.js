@@ -158,9 +158,9 @@ function exportView(){
     kpos:Object.fromEntries(S.agents.flatMap(a=>a.positions).map(p=>{const tf=p.tf||S.settings.tf;return [p.sym+'|'+tf,(kOf(tf,p.sym)||[]).slice(-60).map(x=>[x.t,x.o,x.h,x.l,x.c])];})),
     ui:{radar:ui.radar,summary:ui.summary,reasons:ui.reasons,scanAt:ui.scanAt},KR:{ok:KR.ok,err:KR.err,model:KR.model,ms:KR.ms,at:KR.at,fake:KR.fake,busy:KR.busy,asked:KR.asked}};
 }
-let remErr=null,remAt=0;
+let remErr=null,remAt=0,remFails=0,remOk0=0;
 async function pullRemote(){
-  try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined); /* la clave va en la cabecera, no en la dirección */
+  try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined,30000); /* el plan gratuito de Render es lento: se le dan 30 s */ /* la clave va en la cabecera, no en la dirección */
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
     S=j.S;const now=Date.now();
     market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;
@@ -168,8 +168,8 @@ async function pullRemote(){
     market.kpos={};for(const k in j.kpos||{})market.kpos[k]=j.kpos[k].map(x=>({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}));
     market.src={};for(const k in j.market.src||{})market.src[k]=Object.assign({},j.market.src[k],{at:j.market.src[k].at?now-(j.at-j.market.src[k].at):0});
     Object.assign(ui,j.ui||{});Object.assign(KR,j.KR||{});if(KR.at)KR.at=now-(j.at-KR.at);
-    remErr=null;remAt=now;
-  }catch(e){remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
+    remErr=null;remAt=now;remFails=0;
+  }catch(e){remFails++;remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
 }
 const inFrame=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
 function renderBan(){
@@ -201,25 +201,32 @@ function renderBan(){
 const GH_STATE='carmona86c-hub/Autokill';
 const SRV={ghAt:0,ghSave:0,warned:0,waking:false};
 async function ghLastSave(){
-  if(Date.now()-SRV.ghAt<10*60e3)return SRV.ghSave;SRV.ghAt=Date.now();
+  if(Date.now()-SRV.ghAt<2*60e3)return SRV.ghSave;SRV.ghAt=Date.now();
   try{const j=await fget('https://api.github.com/repos/'+GH_STATE+'/commits?sha=estado&per_page=1');const d=j&&j[0]&&j[0].commit&&j[0].commit.committer&&j[0].commit.committer.date;SRV.ghSave=d?Date.parse(d):0;}catch(e){}
   return SRV.ghSave;
 }
 const agoTxt=ms=>{const m=Math.round(ms/60000);return m<60?m+' min':m<2880?Math.round(m/60)+' h':Math.round(m/1440)+' días';};
 function srvDown(){
   if(!REM.on)return null;
-  if(remErr)return 'no responde ('+remErr+')';
-  if(remAt&&Date.now()-remAt>3*60e3)return 'no responde desde hace '+agoTxt(Date.now()-remAt);
+  /* un fallo suelto no es una caída (el servidor gratuito a veces tarda): solo se avisa tras 3 fallos seguidos y 3 min sin respuesta */
+  if(remErr&&remFails>=3&&(!remAt||Date.now()-remAt>3*60e3))return 'no responde ('+remErr+')';
+  if(remAt&&Date.now()-remAt>5*60e3)return 'no responde desde hace '+agoTxt(Date.now()-remAt);
   if(S&&S.running&&S.lastSeen&&Date.now()-S.lastSeen>15*60e3)return 'responde, pero el agente lleva '+agoTxt(Date.now()-S.lastSeen)+' sin revisar el mercado';
   return null;
 }
 function renderSrv(){
   const why=srvDown();$('srvBan').hidden=!why;if(!why){SRV.warned=0;return;}
   const g=SRV.ghSave,last=g?' Último guardado del agente: hace '+agoTxt(Date.now()-g)+' ('+clock(g)+').':'';
+  /* el agente guarda en GitHub cada 10 min y en cada operación: si ese guardado es reciente, el agente SIGUE operando;
+     lo que falla es solo la conexión entre este móvil y el servidor */
+  if(g&&Date.now()-g<13*60e3){$('srvTitle').textContent='El servidor tarda en contestar';
+    $('srvMsg').textContent='El servidor '+why+', pero el agente sigue operando: guardó su estado hace '+agoTxt(Date.now()-g)+' ('+clock(g)+'). Solo falla la conexión entre este dispositivo y el servidor (red móvil o servidor ocupado); la app reintenta sola.';
+    ghLastSave().then(v=>{if(v&&v!==g)renderSrv();});return;}
+  $('srvTitle').textContent='El agente 24/7 no está funcionando';
   $('srvMsg').textContent='El servidor '+why+'. Mientras tanto no se abre ni se cierra ninguna operación y los stops no se vigilan.'+last+
     ' Si «Despertar» no lo arranca, el plan gratuito de Render lo ha suspendido (750 h al mes para todos tus servicios): entra en Render, abre «autokill» y pulsa Resume o Manual Deploy.';
   ghLastSave().then(v=>{if(v&&v!==g)renderSrv();});
-  if(!SRV.warned){SRV.warned=Date.now();const t='⚠️ Automaton: el servidor 24/7 '+why+'. El agente no está operando.';sysPost(t);tgPost(t);}
+  if(!SRV.warned&&SRV.ghAt){SRV.warned=Date.now();const t='⚠️ Automaton: el servidor 24/7 '+why+'. El agente no está operando.';sysPost(t);tgPost(t);}
 }
 $('srvWake').addEventListener('click',async()=>{
   if(SRV.waking)return;SRV.waking=true;const b=$('srvWake');b.textContent='Despertando… (hasta 1 min)';

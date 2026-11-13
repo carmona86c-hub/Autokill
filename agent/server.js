@@ -160,14 +160,21 @@ function readBody(req) {
   });
 }
 const ready = () => { try { return run('!!S'); } catch (e) { return false; } };
+/* diagnóstico: cuánto se queda bloqueado el agente (si pasa de varios segundos, la app no recibe respuesta a tiempo) */
+const LAG = { max: 0, maxAt: 0, over5: 0, big: [] }; let lagLast = Date.now();
+setInterval(() => { const n = Date.now(), d = n - lagLast - 500; lagLast = n;
+  if (d > LAG.max || n - LAG.maxAt > 3600e3) { LAG.max = Math.max(0, d); LAG.maxAt = n; }
+  if (d > 5000) { LAG.over5++; LAG.big.unshift([new Date(n).toISOString().slice(11, 19), d]); LAG.big.length = Math.min(LAG.big.length, 8); log('Agente bloqueado', d, 'ms'); } }, 500).unref();
+const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS });
+let STATE_MS = 0;
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   try {
-    if (u.pathname === '/agent/health') return send(res, 200, { ok: true, ready: ready(), saved: saveInfo, github: !!TOKEN, keyRequired: !!KEY });
+    if (u.pathname === '/agent/health') return send(res, 200, { ok: true, ready: ready(), saved: saveInfo, github: !!TOKEN, keyRequired: !!KEY, diag: diag() });
     if (!ready()) return send(res, 503, { error: 'el agente está arrancando' });
     if (req.method === 'GET' && u.pathname === '/agent/state') {
       if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
-      const v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN };
+      const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN }; STATE_MS = Date.now() - t0;
       return send(res, 200, v);
     }
     if (req.method === 'POST' && u.pathname === '/agent/cmd') {

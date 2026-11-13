@@ -46,8 +46,8 @@ const catOf=k=>(metaOf(k)&&metaOf(k).cat)||(srcOf(k)==='BN'?'Cripto':'Otros');
 function setPx(k,v){if(v>0&&isFinite(v)){market.price[k]=v;market.pt[k]=Date.now();}}
 const pxFresh=(k,ms)=>market.price[k]>0&&Date.now()-(market.pt[k]||0)<ms;
 let instantFails=0,okFetches=0;
-async function fget(url,opt){
-  const c=new AbortController(),to=setTimeout(()=>c.abort(),9000),t0=performance.now();
+async function fget(url,opt,ms){
+  const c=new AbortController(),to=setTimeout(()=>c.abort(),ms||9000),t0=performance.now();
   try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok){const er=new Error('HTTP '+r.status);er.retry=+(r.headers&&r.headers.get&&r.headers.get('retry-after')||0);throw er;}const j=await r.json();okFetches++;return j;}
   catch(e){if(e&&e.name==='TypeError'&&performance.now()-t0<60)instantFails++;throw e;}
   finally{clearTimeout(to);}

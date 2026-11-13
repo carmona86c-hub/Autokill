@@ -162,14 +162,20 @@ let remErr=null,remAt=0,remFails=0,remOk0=0;
 async function pullRemote(){
   try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined,30000); /* el plan gratuito de Render es lento: se le dan 30 s */ /* la clave va en la cabecera, no en la dirección */
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
-    S=j.S;const now=Date.now();
+    remApply(j,Date.now());remErr=null;remAt=Date.now();remFails=0;
+    /* se guarda la última foto del servidor: al abrir la app se ve eso (con su hora) mientras llega la nueva, no un estado viejo de este móvil */
+    if(Date.now()-(remCacheT||0)>60e3){remCacheT=Date.now();try{localStorage.setItem(REMLAST,JSON.stringify(j));}catch(e){}}
+  }catch(e){remFails++;remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
+}
+const REMLAST='automaton.remote.last';let remCacheT=0;
+function remCached(){try{const j=JSON.parse(localStorage.getItem(REMLAST)||'null');if(j&&j.S&&valid(j.S)){remApply(j,j.at||Date.now());market.src={};return true;}}catch(e){}return false;}
+function remApply(j,now){
+    S=j.S;
     market.price=j.market.price||{};market.pt={};for(const k in market.price)market.pt[k]=now;
     Object.assign(market.meta,j.market.meta||{});market.universe=j.market.universe||[];market.lists=j.market.lists||{BN:[],BF:[],HL:[]};market.rules=j.market.rules||{};market.fund=j.market.fund||{};market.err=j.market.err;market.wsv=j.market.ws||{};
     market.kpos={};for(const k in j.kpos||{})market.kpos[k]=j.kpos[k].map(x=>({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}));
     market.src={};for(const k in j.market.src||{})market.src[k]=Object.assign({},j.market.src[k],{at:j.market.src[k].at?now-(j.at-j.market.src[k].at):0});
     Object.assign(ui,j.ui||{});Object.assign(KR,j.KR||{});if(KR.at)KR.at=now-(j.at-KR.at);
-    remErr=null;remAt=now;remFails=0;
-  }catch(e){remFails++;remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
 }
 const inFrame=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
 function renderBan(){
@@ -211,7 +217,7 @@ function srvDown(){
   /* un fallo suelto no es una caída (el servidor gratuito a veces tarda): solo se avisa tras 3 fallos seguidos y 3 min sin respuesta */
   if(remErr&&remFails>=3&&(!remAt||Date.now()-remAt>3*60e3))return 'no responde ('+remErr+')';
   if(remAt&&Date.now()-remAt>5*60e3)return 'no responde desde hace '+agoTxt(Date.now()-remAt);
-  if(S&&S.running&&S.lastSeen&&Date.now()-S.lastSeen>15*60e3)return 'responde, pero el agente lleva '+agoTxt(Date.now()-S.lastSeen)+' sin revisar el mercado';
+  if(remAt&&S&&S.running&&S.lastSeen&&Date.now()-S.lastSeen>15*60e3)return 'responde, pero el agente lleva '+agoTxt(Date.now()-S.lastSeen)+' sin revisar el mercado';
   return null;
 }
 function renderSrv(){
@@ -372,7 +378,8 @@ $('impBtn').addEventListener('click',async()=>{
 });
 /* arranque */
 (async()=>{
-  S=await loadState();$('capIn').value=S.initial;
+  S=await loadState();if(REM.on)remCached(); /* mirando el servidor: se parte de su última foto, no del estado propio del móvil */
+  $('capIn').value=S.initial;
   keepAwake();render();tick(true);
   window.__automaton={get S(){return S;},market,KR,tick,eq,total,stats,alive,sessOpen,nextOpen,minsToClose,sessOf,spawnChild,fundChild,sendMsg,pruneDead,verifyConst,checkChild,lifecycle,kill,CONST_HASH};
 })();

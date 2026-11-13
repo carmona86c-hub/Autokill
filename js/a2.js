@@ -122,18 +122,69 @@ function krPing(){
   if(!krOn()||Date.now()-KR.ping<10*60e3)return;KR.ping=Date.now();
   fget(krUrl('/')).then(j=>{if(j&&j.ready){KR.ok=true;KR.err=null;KR.at=Date.now();KR.model=j.model||KR.model;KR.fake=!!j.fake;}}).catch(()=>{});
 }
-/* salidas anticipadas: Kronos ve un giro claro en contra de una posición abierta */
+/* salidas anticipadas: Kronos ve un giro claro en contra de una posición abierta.
+   Modos: «full» (confirma entradas y anticipa salidas) y «exits» (solo anticipa salidas; las compras van solo con reglas).
+   Cada venta anticipada se sigue después con las reglas de venta normales del bot (stop, objetivo, mitad, trailing…)
+   para saber qué habría pasado si se hubiera dejado. Con eso aprende (krxLearn):
+   si vender antes sale peor que esperar, exige un aviso más claro y, si aun así sale peor, deja de hacerlo
+   (pero sigue apuntando en «sombra» lo que habría hecho, y vuelve a hacerlo si se demuestra que habría ayudado). */
+const KRX_TH=[.25,.15,.08],KRX_MIN=8;
+function krxOf(){return S.krx||(S.krx={th:0,off:0,chg:0,open:[],list:[]});}
+const krExitMode=()=>krOn()&&['full','exits'].includes(kset().mode);
 function krExit(a){
-  if(!krOn()||kset().mode!=='full')return;
+  if(!krExitMode())return;
+  const X=krxOf(),th=KRX_TH[X.th]||.25;
   for(const p of a.positions.slice()){
-    const e=krEntry(p.sym,p.tf||S.settings.tf);if(!e||e.at<p.openedAt)continue;
+    const tf=p.tf||S.settings.tf,e=krEntry(p.sym,tf);if(!e||e.at<p.openedAt)continue;
     const sh=isShort(p),dir=sh?-e.r.ret:e.r.ret,agree=sh?1-e.r.up:e.r.up,px0=market.price[p.sym]||p.entry,fav=p.risk>0?(sh?p.entry-px0:px0-p.entry)/p.risk:0;
-    if(agree<=.25&&dir<-costOf(p.sym)){
-      /* en pérdida corta antes de llegar al stop; en ganancia no vende: asegura el stop en la entrada y deja correr */
-      if(fav<0)closePos(a,p,`Kronos prevé giro en contra (${pct(dir)})`);
-      else if(fav>=.3&&!p.krProt){p.krProt=1;protect(p);L(a,'info',`${base(p.sym)}: Kronos prevé giro en contra; el stop pasa a la entrada para no devolver lo ganado.`);}
+    if(!(agree<=th&&dir<-costOf(p.sym)))continue;
+    if(fav<0){
+      const st=krxSnap(p,tf);
+      if(X.off){ /* en pausa: no vende, pero apunta qué habría pasado si vendía ahora (una vez por posición) */
+        if(!p.krShadow){p.krShadow=1;X.open.push(Object.assign(st,{x:px0,s:1}));}
+        continue;}
+      closePos(a,p,`Kronos prevé giro en contra (${pct(dir)}, ${Math.round((1-agree)*100)} % de escenarios a la baja)`);
+      const c=a.closed[0];X.open.push(Object.assign(st,{x:c&&c.sym===p.sym?c.exit:px0}));
     }
+    /* en ganancia no vende: asegura el stop en la entrada y deja correr */
+    else if(fav>=.3&&!p.krProt&&!X.off){p.krProt=1;protect(p);L(a,'info',`${base(p.sym)}: Kronos prevé giro en contra; el stop pasa a la entrada para no devolver lo ganado.`);}
   }
+}
+/* foto de la posición en el momento de la venta anticipada, para seguirla como si no se hubiera vendido */
+function krxSnap(p,tf){const sh=isShort(p);return {k:p.sym,tf,sh:sh?1:0,t:Date.now(),e:p.entry,sd:p.risk,a:p.atr||p.risk,stop:p.stop,tp:p.tp,
+  high:p.high||p.entry,low:p.low||p.entry,half:p.taken?1:0,run:p.runner?1:0,bars:Math.max(0,Math.floor((Date.now()-p.openedAt)/TF_MS[tf])),q:p.qty,th:krxOf().th};}
+/* sigue cada venta anticipada (o en sombra) con las velas reales y las reglas de venta del bot */
+function krxResolve(){
+  const X=krxOf();if(!X.open.length)return;
+  const P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,keep=[];let n=0;
+  for(const s of X.open){
+    const c=kOf(s.tf,s.k);if(!c||c.length<60){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    const sr=serie(c),ef=sr.E[P.emaF]||(sr.E[P.emaF]=ema(sr.c,P.emaF)),es=sr.E[P.emaS]||(sr.E[P.emaS]=ema(sr.c,P.emaS));
+    const i0=sr.k.findIndex(x=>x.t>s.t);if(i0<0){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    const sh=!!s.sh,cost=costOf(s.k),p={sh,e:s.e,r:s.sd,atr:s.a,stop:s.stop,tp:s.tp,cap:0,high:s.high,low:s.low,bars:s.bars,half:!!s.half,run:!!s.run,r1:0,mfe:0,mae:0};
+    let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){out=x;break;}}
+    if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    /* positivo = vender antes ahorró dinero frente a dejarla */
+    const d=(sh?out.px-s.x:s.x-out.px)*s.q;
+    X.list.unshift({t:s.t,t1:Date.now(),k:s.k,s:s.s?1:0,x:s.x,h:out.px,res:out.why,d:+d.toFixed(4),dR:+((sh?out.px-s.x:s.x-out.px)/s.sd).toFixed(2),th:s.th});n++;
+    if(!s.s)L(null,'info',`Kronos · repaso de la venta anticipada de ${base(s.k)}: si se hubiera dejado, habría salido por «${out.why}» a ${px(out.px)}. Vender antes ${d>=0?'ahorró '+money(d):'costó '+money(-d)}.`);
+  }
+  X.open=keep;if(X.list.length>300)X.list.length=300;if(n)krxLearn();
+}
+function krxLearn(){
+  const X=krxOf(),R=X.list.filter(x=>x.t1>=X.chg&&(!!x.s===!!X.off));if(R.length<KRX_MIN)return;
+  const sum=R.reduce((s,x)=>s+x.d,0),avg=sum/R.length,lvl=th=>Math.round((1-KRX_TH[th])*100);
+  if(!X.off&&avg<0){
+    if(X.th<KRX_TH.length-1){X.th++;L(null,'evolve',`Kronos · salidas anticipadas: en ${R.length} casos vender antes costó de media ${money(-avg)} frente a dejarlas. Desde ahora solo vende antes si al menos el ${lvl(X.th)} % de los escenarios prevén caída.`);}
+    else{X.off=1;L(null,'evolve',`Kronos · salidas anticipadas: aun exigiendo un aviso muy claro, vender antes salió peor que esperar (${money(-avg)} de media en ${R.length} casos). Deja de hacerlo; sigue apuntando qué habría pasado y lo retomará si se demuestra que ayuda.`);}
+    X.chg=Date.now();}
+  else if(X.off&&avg>0){X.off=0;X.chg=Date.now();L(null,'evolve',`Kronos · salidas anticipadas: en ${R.length} casos apuntados, vender antes habría ahorrado de media ${money(avg)}. Vuelve a hacerlo (aviso del ${lvl(X.th)} %).`);}
+  else if(!X.off&&avg>0&&X.th>0&&R.length>=2*KRX_MIN){X.th--;X.chg=Date.now();L(null,'evolve',`Kronos · salidas anticipadas: vender antes está ahorrando de media ${money(avg)} (${R.length} casos). Se relaja el aviso al ${lvl(X.th)} % de escenarios a la baja.`);}
+}
+function krxText(){
+  const X=S.krx;if(!X||(!X.list.length&&!X.open.length))return 'aún sin ventas anticipadas.';
+  const real=X.list.filter(x=>!x.s),sh=X.list.filter(x=>x.s),f=L=>L.length?`${L.length} casos, ${L.reduce((s,x)=>s+x.d,0)>=0?'ahorro':'coste'} total ${money(Math.abs(L.reduce((s,x)=>s+x.d,0)))} (${L.filter(x=>x.d>0).length} acertadas)`:'ninguna';
+  return `vendidas antes: ${f(real)}; en sombra (sin vender): ${f(sh)}; pendientes de saber qué habría pasado: ${X.open.length}. Estado: ${X.off?'en pausa (solo apunta)':'activa, aviso del '+Math.round((1-KRX_TH[X.th])*100)+' % de escenarios a la baja'}.`;
 }
 
 /* ---------- informe para revisar con Claude ---------- */
@@ -613,7 +664,7 @@ function decide(a,an,P,T,pre){
   {const lim=Math.min(4,Math.max(2,Math.ceil(Math.min(P.maxPos,T.pos)*.75)));if(catOf(an.sym)==='Cripto'&&!isBS(an.sym)&&a.positions.filter(p=>catOf(p.sym)==='Cripto'&&!isBS(p.sym)&&(p.side||'long')===(an.side||'long')).length>=lim)return `ya tiene ${lim} criptomonedas en la misma dirección`;}
   /* el mismo activo por otra vía (p. ej. NVDA en Binance Futuros y en Hyperliquid) es la misma exposición: no se duplica */
   if(a.positions.some(p=>p.sym===an.sym||ubase(p.sym)===ubase(an.sym)))return 'ya en cartera';
-  if(!pre&&krOn()){
+  if(!pre&&krOn()&&kset().mode!=='exits'){ /* «solo salidas»: las compras no esperan a Kronos */
     const f=krOf(an.sym,an.tf);
     if(!f){if(!KR.err||KR.ok){an.krPending=true;return 'esperando la previsión de Kronos';}}
     else{

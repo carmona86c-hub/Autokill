@@ -583,7 +583,7 @@ function sigAct(){
     if(good&&!A.off[d.k]){A.off[d.k]={at:Date.now(),n:d.n,m:d.m};tg(`Laboratorio: apaga el filtro «${d.k}». Rechazó ${d.n} señales que habrían dado ${d.m.toFixed(2)}R de media: estaba quitando operaciones buenas.`);}
     else if(!good&&A.off[d.k]&&d.n>=SIG_N&&d.t<1)delete A.off[d.k];}
 }
-function sigTick(){const G=sigOf(),now=Date.now();if(now-G.at<5*60e3)return;G.at=now;sigResolve();if(now-G.sumAt>=3600e3||!G.sum){G.sumAt=now;sigAnalyze();sigAct();}}
+function sigTick(){const G=sigOf(),now=Date.now();if(now-G.at<5*60e3)return;G.at=now;sigResolve();try{krxResolve();}catch(e){}if(now-G.sumAt>=3600e3||!G.sum){G.sumAt=now;sigAnalyze();sigAct();}}
 const sigBlocked=(f,A)=>{for(const key in A.block){const i=key.indexOf('=');if(f[key.slice(0,i)]===key.slice(i+1))return key.replace('=',' = ');}return null;};
 {const d1=decide;decide=function(a,an,P,T,pre){
   let w=d1(a,an,P,T,pre);
@@ -856,11 +856,14 @@ function tfCompare(){
 function tfText(){const G=S.tfcmp;if(!G||!G.avg)return 'aún sin medir (se calcula una vez al día).';const L=['5m','15m','1h','4h'],lab={'5m':'5 min','15m':'15 min','1h':'1 hora','4h':'4 horas'};
   const best=L.slice().sort((x,y)=>G.avg[y].per30-G.avg[x].per30)[0];
   return L.map(tf=>`${lab[tf]}: ${G.avg[tf].n} op., media ${bmPct(G.avg[tf].avg,2)} por operación, ${bmPct(G.avg[tf].per30,2)} cada 30 días por activo`).join(' · ')+` — mejor hasta ahora: ${lab[best]} (${G.hist.length} día${G.hist.length===1?'':'s'} medidos${G.hist.length<10?'; aún pocos para decidir':''}).`;}
+{const p0=protReport;protReport=function(){return p0.apply(this,arguments)+`\nKRONOS · SALIDAS ANTICIPADAS (comparadas con qué habría pasado si se dejaban):\n  ${krxText()}\n`;};}
 {const p1=protReport;protReport=function(){return p1.apply(this,arguments)+`\nPRUEBA DE MARCOS (estrategia actual con costes reales, sobre velas reales):\n  ${tfText()}\n`;};}
 {const b1=benchCard;benchCard=function(){b1.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.appendChild)return;let el=document.getElementById('tfCmp');if(!el){el=document.createElement('div');el.id='tfCmp';}box.appendChild(el);
   const G=S.tfcmp;if(!G||!G.avg){el.innerHTML='<p class="note" style="margin:8px 0 0"><b>Prueba de marcos:</b> se calcula una vez al día.</p>';return;}
   const lab={'5m':'5 min','15m':'15 min','1h':'1 hora','4h':'4 horas'};
   el.innerHTML=`<div class="lbl" style="margin-top:10px">Prueba de marcos: ¿con qué velas gana más?</div><div class="tw"><table><tr><th>Velas</th><th>Op.</th><th>Ganadas</th><th>Media por op.</th><th>Cada 30 días por activo</th></tr>${['5m','15m','1h','4h'].map(tf=>{const x=G.avg[tf];return `<tr><td>${lab[tf]}</td><td>${x.n}</td><td>${Math.round(x.win*100)} %</td><td class="${x.avg>=0?'up':'down'}">${bmPct(x.avg,2)}</td><td class="${x.per30>=0?'up':'down'}">${bmPct(x.per30,2)}</td></tr>`;}).join('')}</table></div><p class="note" style="margin:4px 0 0">La estrategia actual simulada sobre velas reales, con comisiones y deslizamiento. Media de ${G.hist.length} día${G.hist.length===1?'':'s'}${G.hist.length<10?': aún pocos para decidir':''}. Solo informa; el cambio de velas lo decides tú en Ajustes.</p>`;}catch(e){}};}
+{const b2=benchCard;benchCard=function(){b2.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.appendChild||!S.krx)return;let el=document.getElementById('krxBox');if(!el){el=document.createElement('div');el.id='krxBox';}box.appendChild(el);
+  el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>Kronos · salidas anticipadas</b> (comparadas con qué habría pasado si se dejaban): ${esc(krxText())}</p>`;}catch(e){}};}
 {const t1=benchTick;benchTick=function(){t1.apply(this,arguments);try{const G=S.tfcmp,now=Date.now();if((!G||!G.last||now-G.last.t>20*3600e3)&&uni().length>=5&&(market.k['1h']&&Object.keys(market.k['1h']).length>=5))tfCompare();}catch(e){}};}
 
 /* ---------- velas de 4 horas en modo «lo decide el bot» ----------

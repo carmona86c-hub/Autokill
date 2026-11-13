@@ -42,7 +42,7 @@ async function tick(manual){
         else alive().forEach(a=>agentScan(a,true));
         if(krOn()&&!KR.busy){
           const q=new Map();(ui.krQ||[]).sort((x,y)=>y.s-x.s).forEach(x=>{const id=krKey(x.k,x.tf);if(!q.has(id)&&!krEntry(x.k,x.tf)&&KR.tried[id]!==lastT(x.k,x.tf))q.set(id,x);});
-          if(kset().mode==='full')S.agents.forEach(a=>a.positions.forEach(p=>{const tf=p.tf||S.settings.tf,id=krKey(p.sym,tf);if(!q.has(id)&&!krEntry(p.sym,tf)&&isOpen(p.sym)&&KR.tried[id]!==lastT(p.sym,tf))q.set(id,{k:p.sym,tf});}));
+          if(krExitMode())S.agents.forEach(a=>a.positions.forEach(p=>{const tf=p.tf||S.settings.tf,id=krKey(p.sym,tf);if(!q.has(id)&&!krEntry(p.sym,tf)&&isOpen(p.sym)&&KR.tried[id]!==lastT(p.sym,tf))q.set(id,{k:p.sym,tf});}));
           /* si el servidor falló, se reintenta como mucho cada 5 minutos */
           if(q.size&&(KR.ok||!KR.err||Date.now()-KR.at>300000))krFetch([...q.values()]);
         }

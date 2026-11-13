@@ -25,7 +25,7 @@ function agentScan(a,manual){
   }
   const keys=halted||sick?[]:uni().filter(k=>inSpec(a,k)&&isOpen(k)&&minsToClose(sessOf(k))>15).slice(0,T.syms);
   if(halted&&a.id===0){ui.summary='Pausa por límite de pérdida diaria: hoy no abre más operaciones';ui.reasons='';ui.scanAt=Date.now();}
-  const rows=keys.map(k=>tfs().map(tf=>analyze(k,P,tf)).filter(Boolean).flatMap(an=>canShort(k)?[an,an.short]:[an])).filter(x=>x.length)
+  const rows=keys.map(k=>tfs().filter(tf=>tf!=='4h'||tf4ok(k)).map(tf=>analyze(k,P,tf)).filter(Boolean).flatMap(an=>canShort(k)?[an,an.short]:[an])).filter(x=>x.length)
     .sort((x,y)=>Math.max(...y.map(z=>z.score))-Math.max(...x.map(z=>z.score)));
   if(a.id===0)ui.radar=rows.slice(0,8).map(r=>r.reduce((m,z)=>z.score>m.score?z:m));
   let opened=0,logged=0;const tally={};
@@ -561,7 +561,7 @@ function sigAnalyze(){
    Se revisan cada hora y se deshacen solas si la prueba deja de ser clara. */
 /* señales aptas: las que pasaron los filtros de calidad (entró, o no entró solo por falta de hueco o dinero, o por el propio laboratorio).
    Las que se rechazan por calidad (sin tendencia, sin recorrido para cubrir costes…) no sirven para juzgar: casi siempre pierden. */
-const SIG_OK=new Set(['apta: entra','bloqueado por el laboratorio','límite de posiciones','ya en cartera','demasiadas criptos en la misma dirección','capital insuficiente','efectivo pendiente de liquidar o insuficiente']);
+const SIG_OK=new Set(['apta: entra','4 h en prueba','bloqueado por el laboratorio','límite de posiciones','ya en cartera','demasiadas criptos en la misma dirección','capital insuficiente','efectivo pendiente de liquidar o insuficiente']);
 const SIG_MAXBLOCK=6;
 const SIG_FEATS_BLOCK=['mercado y lado','velas','hora','puntuación','RSI','tendencia 1 h','últimos 5 días','fuerza frente a su mercado (24 h)','volatilidad (ATR %)','tendencia de fondo bitcoin','tendencia de fondo Nasdaq'];
 const SIG_FILTERS=['mercado de lado','contra la tendencia del Nasdaq','primeros 15 min de bolsa','día de noticias'];
@@ -862,3 +862,15 @@ function tfText(){const G=S.tfcmp;if(!G||!G.avg)return 'aún sin medir (se calcu
   const lab={'5m':'5 min','15m':'15 min','1h':'1 hora','4h':'4 horas'};
   el.innerHTML=`<div class="lbl" style="margin-top:10px">Prueba de marcos: ¿con qué velas gana más?</div><div class="tw"><table><tr><th>Velas</th><th>Op.</th><th>Ganadas</th><th>Media por op.</th><th>Cada 30 días por activo</th></tr>${['5m','15m','1h','4h'].map(tf=>{const x=G.avg[tf];return `<tr><td>${lab[tf]}</td><td>${x.n}</td><td>${Math.round(x.win*100)} %</td><td class="${x.avg>=0?'up':'down'}">${bmPct(x.avg,2)}</td><td class="${x.per30>=0?'up':'down'}">${bmPct(x.per30,2)}</td></tr>`;}).join('')}</table></div><p class="note" style="margin:4px 0 0">La estrategia actual simulada sobre velas reales, con comisiones y deslizamiento. Media de ${G.hist.length} día${G.hist.length===1?'':'s'}${G.hist.length<10?': aún pocos para decidir':''}. Solo informa; el cambio de velas lo decides tú en Ajustes.</p>`;}catch(e){}};}
 {const t1=benchTick;benchTick=function(){t1.apply(this,arguments);try{const G=S.tfcmp,now=Date.now();if((!G||!G.last||now-G.last.t>20*3600e3)&&uni().length>=5&&(market.k['1h']&&Object.keys(market.k['1h']).length>=5))tfCompare();}catch(e){}};}
+
+/* ---------- velas de 4 horas en modo «lo decide el bot» ----------
+   Se analizan siempre y el laboratorio mide sus señales («4 h en prueba»), pero solo opera con ellas cuando la prueba de marcos,
+   con al menos 10 días medidos y 30 operaciones simuladas, dice que ganan tras comisiones y al menos tanto como las de 1 hora.
+   Si después dejan de cumplirlo, vuelve a no operar con ellas. Siempre avisa del cambio. */
+function tf4Decide(){
+  if(S.settings.use4h!=='auto')return S.settings.use4h===true;
+  const G=S.tfcmp,a=G&&G.avg,x=a&&a['4h'],h=a&&a['1h'],ok=!!(x&&G.hist.length>=10&&x.n>=30&&x.avg>0&&x.per30>=((h&&h.per30)||0));
+  if(ok!==!!S.settings.tf4On){S.settings.tf4On=ok;L(null,'evolve',ok?`Velas de 4 horas: el bot empieza a operar con ellas. En ${G.hist.length} días de prueba ganan ${bmPct(x.avg,2)} por operación tras comisiones y ${bmPct(x.per30,2)} cada 30 días por activo (1 hora: ${bmPct(h.per30,2)}).`:'Velas de 4 horas: el bot deja de operar con ellas; la prueba de marcos ya no dice que ganen.');}
+  return ok;}
+{const d4=decide;decide=function(a,an,P,T,pre){const r=d4(a,an,P,T,pre);if(r||an.tf!=='4h')return r;return tf4Decide()?null:'4 h en prueba';};}
+RLAB.unshift(['4 h en prueba','velas de 4 h: aún en prueba']);

@@ -2,7 +2,7 @@
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;if($('s4h'))$('s4h').value=s.use4h==='auto'?'auto':s.use4h?'1':'0';['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -23,6 +23,7 @@ function applySettings(o){
   if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
   if('device' in o)s.device=String(o.device||'').slice(0,60);
+  if('use4h' in o&&o.use4h!=null&&o.use4h!==s.use4h){s.use4h=o.use4h==='auto'?'auto':!!o.use4h;nextScan=0;L(null,'info',s.use4h==='auto'?'Velas de 4 horas: lo decide el bot. Las analiza siempre y empezará a operar con ellas cuando la prueba de marcos demuestre que ganan.':s.use4h?'Velas de 4 horas: siempre activas en criptos (operaciones que pueden durar días).':'Velas de 4 horas desactivadas.');}
   if(o.tf&&TF_MS[o.tf]&&o.tf!==s.tf){s.tf=o.tf;market.k={};market.kAt={};nextScan=0;market.uniAt=0;}
   if(o.params){const P=S.agents[0].params;for(const k in DEF_PARAMS){const v=parseFloat(o.params[k]);if(isFinite(v)){const [lo,hi]=BOUNDS[k];P[k]=Math.min(hi,Math.max(lo,INTS.has(k)?Math.round(v):v));}}if(P.emaF>=P.emaS)P.emaS=P.emaF+4;}
 }
@@ -346,7 +347,7 @@ function collectSettings(){
   return {fee:n('sFee')/100,slip:n('sSlip')/100,maxDay:n('sDay')/100,universe:Math.round(n('sUni')),maxKids:Math.round(n('sKids')),
     markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',broker:$('sBroker').value,ibPlan:$('sPlan').value,
     kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
-    device:$('devName').value.trim(),tf:$('sTf').value,params};
+    device:$('devName').value.trim(),tf:$('sTf').value,use4h:$('s4h')?($('s4h').value==='auto'?'auto':$('s4h').value==='1'):undefined,params};
 }
 $('saveSet').addEventListener('click',async()=>{
   const r=await act('settings',collectSettings());buildSettings();

@@ -299,7 +299,7 @@ function wsSync(){
 async function fetchKlines(tf){
   const now=Date.now(),ms=TF_MS[tf];market.k[tf]=market.k[tf]||{};market.kAt=market.kAt||{};market.kAt[tf]=Math.floor(now/ms);
   const held=new Set();S.agents.forEach(a=>a.positions.forEach(p=>held.add(p.sym)));
-  const keys=[...new Set([...uni(),...held])].filter(k=>(isOpen(k)||held.has(k))&&!cooling(srcOf(k)));
+  const keys=[...new Set([...uni(),...held])].filter(k=>(isOpen(k)||held.has(k))&&!cooling(srcOf(k))&&(tf!=='4h'||tf4ok(k)||held.has(k)));
   if(!market.raw)market.raw={};
   const toK=k=>k.map(r=>({t:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5],ct:r[6]}));
   const store=(k,arr)=>{
@@ -309,7 +309,7 @@ async function fetchKlines(tf){
     const cls=sessOf(k);market.k[tf][k]=all.filter(c=>c.ct<now&&sessOpen(cls,c.t)).slice(-1000);
   };
   /* sin historial previo: se piden varios días para reunir velas de sesión real; después, solo las nuevas */
-  const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
+  const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='4h'?40:tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
   const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
   await Promise.all([
     pool(bin,3,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
@@ -318,16 +318,18 @@ async function fetchKlines(tf){
       else{const st=since(k),gap=st?Math.ceil((now-st)/ms):1e9;r=await fget(`${FAPI}/fapi/v1/klines?symbol=${id}&interval=${tf}&`+(gap<=98?`startTime=${st}&limit=99`:'limit=499'));}
       }catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail(srcOf(k),e);throw e;}
       store(k,toK(r));}),
-    pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':1,'5m':4,'15m':11,'1h':42}[tf]||4)*864e5;
+    pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':1,'5m':4,'15m':11,'1h':42,'4h':170}[tf]||4)*864e5;
       let r;try{r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});}catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail('HL',e);throw e;}
       store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); })
   ]);
 }
-const TF_MS={'1m':6e4,'5m':3e5,'15m':9e5,'1h':36e5};
+const TF_MS={'1m':6e4,'5m':3e5,'15m':9e5,'1h':36e5,'4h':144e5};
 /* el agente decide en las velas elegidas y, si están demasiado tranquilas, en las de la escala superior */
 const HIGHER={'1m':'5m','5m':'15m','15m':'1h'};
 /* también 1 hora: con el mercado tranquilo, las velas cortas no cubren comisiones y las largas sí */
-const tfs=()=>[...new Set([S.settings.tf,HIGHER[S.settings.tf],'1h'])];
+/* y, si está activado, 4 horas: solo para criptos (24 h). Las acciones de IBKR se venden antes del cierre y no da tiempo a una operación de días */
+const tfs=()=>[...new Set([S.settings.tf,HIGHER[S.settings.tf],'1h'].concat(S.settings.use4h?['4h']:[]))]; /* 'auto': se analizan siempre; el bot decide si opera con ellas */
+const tf4ok=k=>sessOf(k)==='24x7'&&!isBS(k)&&catOf(k)==='Cripto';
 const kOf=(tf,k)=>(market.k[tf]||{})[k];
 
 /* ---------- estado ---------- */

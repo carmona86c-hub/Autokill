@@ -21,6 +21,7 @@ function migrate(s){
   if(!s.settings.exitV2){s.settings.exitV2=1;s.agents.forEach(a=>{if(a.params)a.params.trailATR=Math.max(2,+a.params.trailATR||0);});}
   /* criptomonedas en Binance Futuros (una sola vez): la experiencia de cada cripto pasa a su contrato */
   /* broker IBKR (una sola vez): la simulación sigue sus comisiones, mercados y reglas */
+  if(s.settings.tf4V1===undefined){s.settings.tf4V1=1;s.settings.use4h='auto';}
   if(s.settings.bnbV1===undefined){s.settings.bnbV1=1;s.settings.bnbFee=true;}
   if(s.settings.broker===undefined){s.settings.broker='ibkr';s.settings.ibPlan='tiered';}
   /* IBKR + Binance (una sola vez): lo que ya estaba abierto se compró en IBKR y ahí sigue */

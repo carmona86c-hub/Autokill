@@ -20,6 +20,7 @@ const FILE = 'agent.json';
 const LS_KEY = 'automaton.app.real.v1';
 const SAVE_MS = +(process.env.SAVE_MS || 10 * 60e3);
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+const SELF_ORIGIN = (process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL || '').replace(/\/+$/, '');
 
 /* ---------- navegador mínimo: lo justo para que el código de la app funcione sin pantalla ---------- */
 function el() {
@@ -48,7 +49,10 @@ const doc = {
 const sandbox = {
   __SERVER__: true, console, setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
   fetch: process.env.AGENT_MOCK ? require(path.resolve(process.env.AGENT_MOCK)) : (u, o) => {
-    o = Object.assign({}, o || {}); delete o.mode; return fetch(u, o);  /* "no-cors" es cosa de navegadores */
+    o = Object.assign({}, o || {}); delete o.mode;  /* "no-cors" es cosa de navegadores */
+    /* Kronos está en este mismo servidor: se le llama por dentro, sin salir a internet y volver (más rápido y sin fallos de red) */
+    if (SELF_ORIGIN && typeof u === 'string' && u.startsWith(SELF_ORIGIN + '/forecast')) u = 'http://127.0.0.1:' + (process.env.PORT || 10000) + u.slice(SELF_ORIGIN.length);
+    return fetch(u, o);
   },
   AbortController, URLSearchParams, FormData, Blob, TextEncoder, TextDecoder, performance,
   WebSocket: process.env.AGENT_MOCK ? undefined : globalThis.WebSocket,  /* conexión continua de precios (Node 22) */
@@ -165,7 +169,7 @@ const LAG = { max: 0, maxAt: 0, over5: 0, big: [] }; let lagLast = Date.now();
 setInterval(() => { const n = Date.now(), d = n - lagLast - 500; lagLast = n;
   if (d > LAG.max || n - LAG.maxAt > 3600e3) { LAG.max = Math.max(0, d); LAG.maxAt = n; }
   if (d > 5000) { LAG.over5++; LAG.big.unshift([new Date(n).toISOString().slice(11, 19), d]); LAG.big.length = Math.min(LAG.big.length, 8); log('Agente bloqueado', d, 'ms'); } }, 500).unref();
-const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS });
+const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS, kronos: (() => { try { return run('({ok:KR.ok,err:KR.err,asked:KR.asked,ms:KR.ms,loading:!!KR.loading})'); } catch (e) { return null; } })() });
 let STATE_MS = 0;
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');

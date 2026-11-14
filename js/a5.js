@@ -165,7 +165,7 @@ let remErr=null,remAt=0,remFails=0,remOk0=0;
 async function pullRemote(){
   try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined,30000); /* el plan gratuito de Render es lento: se le dan 30 s */ /* la clave va en la cabecera, no en la dirección */
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
-    remApply(j,Date.now());remErr=null;remAt=Date.now();remFails=0;try{remNotify(j.S.log||[]);}catch(e){}
+    remApply(j,Date.now());remErr=null;remAt=Date.now();remFails=0;SRV.alpaca=j.server&&j.server.alpaca||null;try{remNotify(j.S.log||[]);}catch(e){}
     /* se guarda la última foto del servidor: al abrir la app se ve eso (con su hora) mientras llega la nueva, no un estado viejo de este móvil */
     if(Date.now()-(remCacheT||0)>60e3){remCacheT=Date.now();try{localStorage.setItem(REMLAST,JSON.stringify(j));}catch(e){}}
   }catch(e){remFails++;remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}

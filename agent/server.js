@@ -171,7 +171,7 @@ const LAG = { max: 0, maxAt: 0, over5: 0, big: [] }; let lagLast = Date.now();
 setInterval(() => { const n = Date.now(), d = n - lagLast - 500; lagLast = n;
   if (d > LAG.max || n - LAG.maxAt > 3600e3) { LAG.max = Math.max(0, d); LAG.maxAt = n; }
   if (d > 5000) { LAG.over5++; LAG.big.unshift([new Date(n).toISOString().slice(11, 19), d]); LAG.big.length = Math.min(LAG.big.length, 8); log('Agente bloqueado', d, 'ms'); } }, 500).unref();
-const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS, kronos: (() => { try { return run('({ok:KR.ok,err:KR.err,asked:KR.asked,ms:KR.ms,loading:!!KR.loading})'); } catch (e) { return null; } })(), gate: (() => { try { return run('({pares:GATE.pairs?Object.keys(GATE.pairs).length:0,err:GATE.err,fallos:GATE.fails})'); } catch (e) { return null; } })() });
+const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS, kronos: (() => { try { return run('({ok:KR.ok,err:KR.err,asked:KR.asked,ms:KR.ms,loading:!!KR.loading})'); } catch (e) { return null; } })(), gate: (() => { try { return run('({pares:GATE.pairs?Object.keys(GATE.pairs).length:0,err:GATE.err,fallos:GATE.fails})'); } catch (e) { return null; } })(), alpaca: AL ? { practica: true, cuenta: AL.acct, err: AL.err, enviadas: AL.sent, fallos: AL.fails, ultimas: AL.last.slice(0, 5) } : null });
 let STATE_MS = 0;
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
@@ -195,7 +195,7 @@ async function handle(req, res) {
     }
     if (req.method === 'GET' && u.pathname === '/agent/state') {
       if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
-      const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN }; STATE_MS = Date.now() - t0;
+      const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN, alpaca: AL ? { cuenta: AL.acct, err: AL.err, enviadas: AL.sent, fallos: AL.fails, ultimas: AL.last.slice(0, 5) } : null }; STATE_MS = Date.now() - t0;
       return send(res, 200, v);
     }
     if (req.method === 'POST' && u.pathname === '/agent/cmd') {
@@ -285,6 +285,44 @@ setInterval(async () => {
     await pushSend(nu.slice(-12).map(e => (e.type === 'open' ? '🟢 ' : e.type === 'close' ? '🔵 ' : '⚠️ ') + e.msg).join('\n'));
   } catch (e) { log('Avisos push:', e.message); }
 }, 20e3).unref();
+
+
+/* =====================================================================================
+   ALPACA · CUENTA DE PRÁCTICA (paper trading). Solo si en Render existen ALPACA_KEY_ID y ALPACA_SECRET
+   y ALPACA_PAPER no es «no». Cada compra y venta de acciones que la simulación hace en Alpaca se envía
+   también a tu cuenta de práctica, para ver a qué precio la ejecuta Alpaca de verdad.
+   SIEMPRE a paper-api.alpaca.markets (dinero ficticio). La dirección de dinero real no está en este código.
+   ===================================================================================== */
+const AL = (() => { const id = process.env.ALPACA_KEY_ID || '', sec = process.env.ALPACA_SECRET || '';
+  if (!id || !sec || process.env.ALPACA_PAPER === 'no') return null;
+  return { base: 'https://paper-api.alpaca.markets', h: { 'APCA-API-KEY-ID': id, 'APCA-API-SECRET-KEY': sec, 'Content-Type': 'application/json' }, acct: null, err: null, sent: 0, fails: 0, last: [] }; })();
+async function alCall(method, path, body) {
+  const r = await fetch(AL.base + path, { method, headers: AL.h, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) { }
+  if (!r.ok) throw new Error('Alpaca ' + r.status + ' ' + ((j && (j.message || j.code)) || t).toString().slice(0, 160));
+  return j;
+}
+async function alAccount() { try { const a = await alCall('GET', '/v2/account'); AL.acct = { status: a.status, cash: +a.cash, equity: +a.equity, buying_power: +a.buying_power, pdt: a.pattern_day_trader, at: Date.now() }; AL.err = null; } catch (e) { AL.err = e.message; } }
+if (AL) { setTimeout(alAccount, 15e3); setInterval(alAccount, 10 * 60e3).unref(); log('Alpaca: cuenta de práctica configurada (paper-api.alpaca.markets)'); }
+/* cada 10 s: órdenes nuevas de la simulación en Alpaca → a la cuenta de práctica */
+const alDone = new Set(); let alStart = Date.now();
+setInterval(async () => {
+  if (!AL || !ready()) return;
+  try {
+    const os = run(`(S.orders||[]).slice(0,30).filter(o=>o.req&&o.req.api==='POST /v2/orders'&&['abrir','cerrar','parcial'].includes(o.kind)).map(o=>({t:o.t,sym:o.sym,kind:o.kind,p:o.req.p,price:o.price}))`);
+    for (const o of os.reverse()) {
+      const key = o.t + '|' + o.sym + '|' + o.kind; if (alDone.has(key) || o.t < alStart) continue; alDone.add(key);
+      try {
+        let r;
+        if (o.kind === 'cerrar') r = await alCall('DELETE', '/v2/positions/' + encodeURIComponent(o.p.symbol));  /* cierra lo que haya en la cuenta de práctica, aunque la cantidad difiera por redondeos */
+        else r = await alCall('POST', '/v2/orders', Object.assign({}, o.p, { client_order_id: ('am-' + o.t + '-' + o.kind).slice(0, 48) }));
+        AL.sent++; AL.last.unshift({ t: Date.now(), sym: o.p.symbol, kind: o.kind, sim: o.price, id: r && (r.id || r.order_id) || null, status: r && r.status || 'enviada' });
+      } catch (e) { AL.fails++; AL.err = e.message; AL.last.unshift({ t: Date.now(), sym: o.p.symbol, kind: o.kind, err: e.message }); log('Alpaca práctica:', e.message); }
+      AL.last.length = Math.min(AL.last.length, 20);
+    }
+    if (alDone.size > 2000) { alDone.clear(); alStart = Date.now(); }
+  } catch (e) { log('Alpaca práctica:', e.message); }
+}, 10e3).unref();
 
 process.on('uncaughtException', e => log('Error no capturado:', e));
 process.on('unhandledRejection', e => log('Promesa rechazada:', e));

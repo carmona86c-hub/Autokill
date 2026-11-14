@@ -31,7 +31,8 @@ function agentScan(a,manual){
   let opened=0,logged=0;const tally={};
   for(const r of rows){
     let pick=null,why=null,best=null;
-    for(const an of r){const w=decide(a,an,P,T);if(an.krPending)(ui.krQ=ui.krQ||[]).push({k:an.sym,tf:an.tf,s:an.score});if(!w){pick=an;break;}if(!best||an.score>best.an.score)best={an,w};}
+    for(const an of r){const w=decide(a,an,P,T);if(an.krPending)(ui.krQ=ui.krQ||[]).push({k:an.sym,tf:an.tf,s:an.score});
+      else if(a.id===0&&krShadow(an,w,P))(ui.krQ=ui.krQ||[]).push({k:an.sym,tf:an.tf,s:an.score-50}); /* solo para medir: Kronos opina, la compra no le espera */if(!w){pick=an;break;}if(!best||an.score>best.an.score)best={an,w};}
     if(pick){const err=openPos(a,pick,P);if(!err){opened++;continue;}why=err;best={an:pick,w:err};}
     else why=best.w;
     const lab=rlab(why);tally[lab]=(tally[lab]||0)+1;
@@ -327,34 +328,44 @@ function variant(P){
   if(Q.emaF>=Q.emaS)Q.emaS=Math.min(BOUNDS.emaS[1],Q.emaF+4);
   return Q;
 }
-const liveExp=(a,since)=>{const t=a.closed.filter(x=>!x.user&&(!since||x.t1>since)).slice(0,30);return {n:t.length,m:t.length?t.reduce((s,x)=>s+x.pct,0)/t.length:0};};
+const liveExp=(a,since)=>{const t=(a.id===0?histOf().filter(x=>x.aid===0):a.closed).filter(x=>!x.user&&(!since||x.t1>since)).slice(0,30);return {n:t.length,m:t.length?t.reduce((s,x)=>s+x.pct,0)/t.length:0};};
 const evoOf=a=>a.evo||(a.evo={ver:1,at:0,last:0,hist:[],prev:null,check:null});
 function selfImprove(a,force){
   if(a.status!=='alive'||S.settings.selfOpt===false)return null;
   const ev=evoOf(a);if(!force&&Date.now()-ev.last<OPT_EVERY)return null;
+  /* no aprender del ruido: no se cambia otra vez hasta que el último cambio se haya juzgado en real
+     (15 operaciones o, como mucho, 7 días) y nunca antes de 48 h desde el anterior */
+  if(!force&&ev.prev&&ev.judged!==ev.ver&&Date.now()-ev.at<7*864e5){
+    if(Date.now()-(ev.waitLog||0)>20*3600e3){ev.waitLog=Date.now();L(a,'info',`Automejora en espera: la versión v${ev.ver} aún se está comprobando en real (${liveExp(a,ev.at).n} de 15 operaciones). No cambia más reglas hasta saber si funciona.`);}
+    return 'en espera';}
+  if(!force&&ev.at&&Date.now()-ev.at<48*3600e3)return 'en espera';
   const ser=[];for(const tf of tfs())for(const k of uni()){if(!inSpec(a,k))continue;const c=kOf(tf,k);if(c&&c.length>=150)ser.push({s:serie(c),cost:costOf(k),sh:canShort(k)});}
   if(ser.length<8)return 'aún no hay velas suficientes para probar variantes';
   ev.last=Date.now();
   /* validación en dos periodos: elige con el 60 % más antiguo de las velas y exige mejorar en los dos tramos recientes (60-80 % y 80-100 %) */
-  const run=(P,part)=>{let sum=0,n=0,w=0;for(const x of ser){const L0=x.s.k.length,cut=[60,Math.floor(L0*.6),Math.floor(L0*.8),L0],r=simSerie(x.s,P,cut[part],cut[part+1],x.cost,x.sh);r.forEach(v=>{sum+=v;n++;if(v>0)w++;});}return {sum,n,w,fit:sum-(n<6?(6-n)*.003:0)};};
-  const both=(A,B)=>({sum:A.sum+B.sum,n:A.n+B.n,w:A.w+B.w,fit:A.fit+B.fit});
+  const run=(P,part)=>{let sum=0,n=0,w=0;const v=[];for(const x of ser){const L0=x.s.k.length,cut=[60,Math.floor(L0*.6),Math.floor(L0*.8),L0],r=simSerie(x.s,P,cut[part],cut[part+1],x.cost,x.sh);r.forEach(y=>{sum+=y;n++;if(y>0)w++;v.push(y);});}return {sum,n,w,v,fit:sum-(n<6?(6-n)*.003:0)};};
+  const both=(A,B)=>({sum:A.sum+B.sum,n:A.n+B.n,w:A.w+B.w,v:A.v.concat(B.v),fit:A.fit+B.fit});
+  /* prueba estadística (Welch) de que la media por operación nueva es mejor que la actual, en las velas que no se usaron para elegir */
+  const tW=(X,Y)=>{const m=z=>z.reduce((t,y)=>t+y,0)/(z.length||1),va=z=>{const q=m(z);return z.reduce((t,y)=>t+(y-q)**2,0)/Math.max(1,z.length-1);},se=Math.sqrt(va(X)/Math.max(1,X.length)+va(Y)/Math.max(1,Y.length));return se>0?(m(Y)-m(X))/se:0;};
   const cur={...a.params},c0=run(cur,0),t0a=run(cur,1),t0b=run(cur,2),t0=both(t0a,t0b);
   let best=cur,bf=c0,tried=1;
   const seeds=[{...cur,...Object.fromEntries(OPT_KEYS.map(k=>[k,DEF_PARAMS[k]]))},...S.agents.filter(x=>x!==a&&x.status==='alive').map(x=>({...cur,...Object.fromEntries(OPT_KEYS.map(k=>[k,x.params[k]]))}))];
   for(const q of seeds){tried++;const f=run(q,0);if(f.fit>bf.fit){best=q;bf=f;}}
   for(let round=0;round<3;round++){const base=best;for(let j=0;j<14;j++){tried++;const q=variant(base),f=run(q,0);if(f.fit>bf.fit){best=q;bf=f;}}}
-  const t1a=best===cur?t0a:run(best,1),t1b=best===cur?t0b:run(best,2),t1=both(t1a,t1b),margin=Math.max(.002,Math.abs(t0.sum)*.1);
-  ev.check={at:Date.now(),tried,series:ser.length,cur:t0.sum,best:t1.sum,n:t1.n};
+  const t1a=best===cur?t0a:run(best,1),t1b=best===cur?t0b:run(best,2),t1=both(t1a,t1b),margin=Math.max(.002,Math.abs(t0.sum)*.1),tt=tW(t0.v,t1.v);
+  ev.check={at:Date.now(),tried,series:ser.length,cur:t0.sum,best:t1.sum,n:t1.n,t:+tt.toFixed(2)};
   const diff=OPT_KEYS.filter(k=>best[k]!==cur[k]);
-  if(!diff.length||t1.n<5||t1.fit<t0.fit+margin||t1a.sum<t0a.sum||t1b.sum<t0b.sum||bf.fit<=c0.fit){
-    L(a,'info',`Automejora: probó ${tried} variantes de sus reglas en ${ser.length} series de velas reales; ninguna gana de forma fiable en los dos periodos recientes de prueba (actuales ${pct(t0.sum)}), así que mantiene las suyas.`);
+  /* exige: al menos 30 operaciones simuladas de prueba, mejorar en los dos periodos, superar el margen y que la mejora por operación no sea casualidad (t ≥ 1,5) */
+  if(!diff.length||t1.n<30||t1.fit<t0.fit+margin||t1a.sum<t0a.sum||t1b.sum<t0b.sum||bf.fit<=c0.fit||tt<1.5){
+    const why=!diff.length?'ninguna variante gana':t1.n<30?`la mejor solo tiene ${t1.n} operaciones de prueba (pide 30)`:tt<1.5&&t1.sum>t0.sum?`la mejor gana algo (${pct(t0.sum)} → ${pct(t1.sum)}) pero podría ser casualidad (t = ${tt.toFixed(1)}, pide 1,5)`:'ninguna gana de forma fiable en los dos periodos recientes de prueba';
+    L(a,'info',`Automejora: probó ${tried} variantes de sus reglas en ${ser.length} series de velas reales; ${why}, así que mantiene las suyas (actuales ${pct(t0.sum)}).`);
     return 'sin cambios';
   }
   ev.prev={params:Object.fromEntries(OPT_KEYS.map(k=>[k,cur[k]])),base:liveExp(a)};ev.ver++;ev.at=Date.now();ev.judged=null;
   OPT_KEYS.forEach(k=>{a.params[k]=best[k];});
   const ch=diff.map(k=>`${PLABEL[k]} ${cur[k]}→${best[k]}`).join(', ');
   ev.hist.unshift({at:Date.now(),ver:ev.ver,ch,before:t0.sum,after:t1.sum,n:t1.n,hit:t1.n?t1.w/t1.n:0});if(ev.hist.length>20)ev.hist.length=20;
-  L(a,'evolve',`Automejora v${ev.ver}: ${a.name} cambia sus reglas (${ch}). En velas reales recientes que no usó para elegir, el resultado simulado pasa de ${pct(t0.sum)} a ${pct(t1.sum)} (${t1.n} operaciones, ${Math.round(t1.w/t1.n*100)}% aciertos). Lo vigilará en real y si va peor vuelve atrás.`);
+  L(a,'evolve',`Automejora v${ev.ver}: ${a.name} cambia sus reglas (${ch}). En velas reales recientes que no usó para elegir, el resultado simulado pasa de ${pct(t0.sum)} a ${pct(t1.sum)} (${t1.n} operaciones, ${Math.round(t1.w/t1.n*100)}% aciertos; mejora por operación con t = ${tt.toFixed(1)}). Lo vigilará en real (15 operaciones) sin tocar más reglas, y si va peor vuelve atrás.`);
   return 'adoptado';
 }
 /* juicio en real: tras 15 operaciones con las reglas nuevas, si pierde dinero y le va peor que antes, deshace el cambio */
@@ -372,7 +383,7 @@ function checkRollback(a){
 let edgeC={at:0,m:{}};
 function edgeAdj(an){
   if(Date.now()-edgeC.at>60000){
-    const all=S.agents.flatMap(a=>a.closed.filter(x=>!x.user).slice(0,200)).sort((x,y)=>y.t1-x.t1),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
+    const all=histOf().filter(x=>!x.user).slice(0,400),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
     for(const d of ['long','short'])m['s:'+d]=f(all.filter(x=>(x.side||'long')===d));
     for(const c of new Set(all.map(x=>catOf(x.sym))))m['c:'+c]=f(all.filter(x=>catOf(x.sym)===c));
     edgeC={at:Date.now(),m};
@@ -426,7 +437,7 @@ const patLab=k=>{const [c,s,t]=k.split('|');return `${c} ${s==='short'?'a la baj
 let patAt=0;
 function patCheck(force){
   const now=Date.now();if(!force&&now-patAt<600000)return;patAt=now;const PZ=S.pause||(S.pause={});
-  const all=S.agents.flatMap(a=>a.closed.filter(x=>!x.user&&x.t1>now-30*864e5)),g={};all.forEach(x=>{(g[patKey(x)]=g[patKey(x)]||[]).push(x);});
+  const all=histOf().filter(x=>!x.user&&x.t1>now-30*864e5),g={}; /* historial permanente: un reinicio de saldo no borra lo aprendido */all.forEach(x=>{(g[patKey(x)]=g[patKey(x)]||[]).push(x);});
   const tg=t=>{L(null,'info',t);try{tgPost('🛡️ Automaton · '+t);}catch(e){}};
   for(const k in g){
     const st=PZ[k],xs=g[k].filter(x=>x.t1>((st&&st.clear)||0)).sort((a,b)=>b.t1-a.t1);
@@ -876,4 +887,112 @@ function tf4Decide(){
   if(ok!==!!S.settings.tf4On){S.settings.tf4On=ok;L(null,'evolve',ok?`Velas de 4 horas: el bot empieza a operar con ellas. En ${G.hist.length} días de prueba ganan ${bmPct(x.avg,2)} por operación tras comisiones y ${bmPct(x.per30,2)} cada 30 días por activo (1 hora: ${bmPct(h.per30,2)}).`:'Velas de 4 horas: el bot deja de operar con ellas; la prueba de marcos ya no dice que ganen.');}
   return ok;}
 {const d4=decide;decide=function(a,an,P,T,pre){const r=d4(a,an,P,T,pre);if(r||an.tf!=='4h')return r;return tf4Decide()?null:'4 h en prueba';};}
-RLAB.unshift(['4 h en prueba','velas de 4 h: aún en prueba']);
+RLAB.unshift(['4 h en prueba','velas de 4 h: aún en prueba']);SIG_OK.add('velas de 4 h: aún en prueba'); /* el laboratorio también debe medirlas */
+
+/* =====================================================================================
+   HISTORIAL PERMANENTE de operaciones: no se borra al reiniciar el saldo.
+   Sirve para que las pausas, los cupos, la automejora y la comparación con/sin Kronos
+   juzguen con todas las operaciones reales y no empiecen de cero en cada etapa.
+   ===================================================================================== */
+const HIST_MAX=3000;
+function histOf(){
+  if(!S.hist){S.hist=[];const all=S.agents.flatMap(a=>a.closed.map(x=>[a,x])).sort((p,q)=>p[1].t1-q[1].t1);all.forEach(([a,x])=>histAdd(a,x));}
+  return S.hist;}
+function histAdd(a,x){
+  if(!x)return;const H=S.hist||(S.hist=[]);
+  H.unshift({aid:a.id,sym:x.sym,side:x.side||'long',tf:x.tf,t0:x.t0,t1:x.t1,pct:+(x.pct||0).toFixed(5),pnl:+(x.pnl||0).toFixed(4),R:x.R,kr:x.kr?1:0,ven:x.ven||null,
+    fees:x.fees||0,mfe:x.mfe,half:x.half||0,rs:String(x.reason||'').slice(0,40),user:x.user?1:0});
+  if(H.length>HIST_MAX)H.length=HIST_MAX;}
+{const c0=closePos;closePos=function(a,p,reason,at,user){histOf();const h=a.closed[0],r=c0.apply(this,arguments);if(a.closed[0]&&a.closed[0]!==h)histAdd(a,a.closed[0]);return r;};}
+
+/* =====================================================================================
+   1 · COSTES: cupo diario y marcos de velas que pierden.
+   Las comisiones se comían la mitad de lo perdido. Operar menos, y solo lo que ha
+   demostrado ganar tras costes, es lo que más mejora el resultado.
+   - Cupo total del día: 24 aperturas; 12 si las últimas 40 operaciones pierden de media.
+   - Cupo por tipo de operación (mercado + dirección + velas), con sus últimos 14 días:
+       pierde de media → 2 al día · gana > 0,2 % por operación → 8 · resto o pocos datos → 4.
+   - Marco de velas en pausa: si la prueba de marcos (≥ 5 días, ≥ 60 operaciones) dice que
+     un tamaño de vela pierde tras costes y otro que se puede usar gana al menos un 0,1 %
+     más por operación, ese tamaño deja de abrir (el laboratorio lo sigue midiendo y se
+     reactiva solo cuando deje de cumplirse).
+   Lo rechazado por cupo o marco cuenta en el laboratorio como «apta», para medir si
+   el freno acierta.
+   ===================================================================================== */
+const dayKey=t=>new Date(t).toISOString().slice(0,10);
+function cupoOf(){const d=dayKey(Date.now());if(!S.cupo||S.cupo.day!==d)S.cupo={day:d,n:0,g:{}};return S.cupo;}
+function grpExp(g,days){const t0=Date.now()-days*864e5,xs=histOf().filter(x=>!x.user&&x.t1>t0&&patKey(x)===g).slice(0,40);
+  return xs.length?{n:xs.length,m:xs.reduce((t,x)=>t+x.pct,0)/xs.length}:{n:0,m:0};}
+function cupoLim(g){const e=grpExp(g,14);return {lim:e.n<10?4:e.m<0?2:e.m>.002?8:4,e};}
+function cupoTot(){const xs=histOf().filter(x=>!x.user).slice(0,40);if(xs.length<20)return {lim:24,m:null,n:xs.length};const m=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return {lim:m<0?12:24,m,n:xs.length};}
+function tfOff(){
+  const G=S.tfcmp,a=G&&G.avg,out={};if(!a||!G.hist||G.hist.length<5)return out;
+  const act=tfs(),use=tf=>a[tf]&&a[tf].n>=60&&act.includes(tf),can=tf=>tf!=='4h'||tf4Decide();
+  const best=act.filter(tf=>use(tf)&&can(tf)).reduce((b,tf)=>!b||a[tf].avg>a[b].avg?tf:b,null);if(!best)return out;
+  for(const tf of act)if(use(tf)&&tf!==best&&a[tf].avg<0&&a[best].avg-a[tf].avg>=.001)
+    out[tf]=`en la prueba de marcos (${G.hist.length} días) las velas de ${tf} pierden ${pct(a[tf].avg)} por operación tras costes y las de ${best} ${pct(a[best].avg)}`;
+  const key=Object.keys(out).sort().join(',');
+  if(key!==(S.tfOffK||'')){const was=(S.tfOffK||'').split(',').filter(Boolean);S.tfOffK=key;
+    Object.keys(out).filter(t=>!was.includes(t)).forEach(t=>L(null,'evolve',`Marco de velas en pausa: deja de abrir con velas de ${t}, porque ${out[t]}. El laboratorio lo sigue midiendo y se reactiva solo si mejora.`));
+    was.filter(t=>!out[t]).forEach(t=>L(null,'evolve',`Marco de velas reactivado: vuelve a abrir con velas de ${t} (la prueba de marcos ya no dice que pierda frente a los demás).`));}
+  return out;}
+function costGate(a,an){
+  const off=tfOff();if(off[an.tf])return `marco de velas en pausa: ${off[an.tf]}`;
+  const C=cupoOf(),T=cupoTot();
+  if(C.n>=T.lim)return `cupo diario cubierto: ya abrió ${C.n} operaciones hoy (máximo ${T.lim}${T.m!=null&&T.m<0?`, reducido porque las últimas ${T.n} operaciones pierden de media ${pct(T.m)}`:''})`;
+  const g=patKey({sym:an.sym,side:an.side,tf:an.tf}),Q=cupoLim(g),n=C.g[g]||0;
+  if(n>=Q.lim)return `cupo diario cubierto en ${patLab(g)}: ${n} de ${Q.lim} hoy${Q.e.n>=10?` (últimos 14 días: ${Q.e.n} operaciones, media ${pct(Q.e.m)})`:''}`;
+  return null;}
+{const d5=decide;decide=function(a,an,P,T,pre){return d5(a,an,P,T,pre)||costGate(a,an);};}
+{const o5=openPos;openPos=function(a,an,P){const r=o5.apply(this,arguments);if(!r){const C=cupoOf(),g=patKey({sym:an.sym,side:an.side,tf:an.tf});C.n++;C.g[g]=(C.g[g]||0)+1;}return r;};}
+RLAB.unshift(['cupo diario','cupo diario cubierto'],['marco de velas en pausa','marco de velas en pausa']); /* delante: si no, «pausa» o «máximo» los confundirían con otros motivos */
+SIG_OK.add('cupo diario cubierto');SIG_OK.add('marco de velas en pausa');
+function costText(){
+  const C=cupoOf(),T=cupoTot(),off=tfOff(),gs=Object.keys(C.g).sort((x,y)=>C.g[y]-C.g[x]);
+  const lim=gs.map(g=>{const q=cupoLim(g);return `${patLab(g)} ${C.g[g]}/${q.lim}`;});
+  return `Hoy ha abierto ${C.n} de ${T.lim} operaciones${T.m!=null&&T.m<0?` (cupo reducido: las últimas ${T.n} pierden de media ${pct(T.m)})`:''}.`+
+    (lim.length?` Por tipo: ${lim.join(' · ')}.`:'')+(Object.keys(off).length?` Marcos en pausa: ${Object.keys(off).join(', ')}.`:' Ningún marco de velas en pausa.');}
+
+/* =====================================================================================
+   4 · KRONOS CON PRUEBAS: con frente a sin, sobre las mismas señales.
+   - Cada señal del laboratorio guarda la opinión de Kronos sobre esa vela
+     («a favor», «en contra», «neutral» o «sin consultar»), aunque la opinión llegue
+     segundos después de apuntarla.
+   - En «Solo anticipar salidas» las compras no esperan a Kronos, pero se le pregunta
+     en segundo plano por las mejores señales para medir si filtrar habría ayudado.
+   - Se compara también en dinero real: operaciones confirmadas por Kronos frente al resto
+     (con el historial permanente, sin perder datos al reiniciar).
+   ===================================================================================== */
+SIG_FK.push('Kronos');
+function krOpin(k,tf,sh){const e=krEntry(k,tf);if(!e)return 'sin consultar';const d=sh?-e.r.ret:e.r.ret,ag=sh?1-e.r.up:e.r.up,c=costOf(k);
+  return d>c&&ag>=.6?'a favor':d<-c&&ag<=.4?'en contra':'neutral';}
+{const sf=sigFeat;sigFeat=function(a,an,P){const f=sf(a,an,P);f.Kronos=krOpin(an.sym,an.tf,an.side==='short');return f;};}
+function krSigFill(ids){
+  const G=S.sig;if(!G||!G.open)return;const fi=SIG_FK.indexOf('Kronos');
+  for(const id of ids){const i=id.lastIndexOf('|'),k=id.slice(0,i),tf=id.slice(i+1),c=KR.cache[id];if(!c)continue;
+    for(const s of G.open)if(s.k===k&&s.tf===tf&&s.v===2&&String(s.id).endsWith('|'+c.t)){while(s.f.length<SIG_FK.length)s.f.push(null);
+      if(s.f[fi]==null||s.f[fi]==='sin consultar')s.f[fi]=krOpin(k,tf,!!s.sh);}}}
+const krShadow=(an,w,P)=>krOn()&&kset().mode==='exits'&&an.score>=P.minScore&&(!w||SIG_OK.has(rlab(w)));
+function krCmp(){
+  const t0=Date.now()-30*864e5,H=histOf().filter(x=>!x.user&&x.t1>t0),st=xs=>({n:xs.length,w:xs.filter(x=>x.pnl>0).length,m:xs.length?xs.reduce((t,x)=>t+x.pct,0)/xs.length:0,pl:xs.reduce((t,x)=>t+x.pnl,0)});
+  const real={con:st(H.filter(x=>x.kr)),sin:st(H.filter(x=>!x.kr))};
+  const G=S.sig||{list:[]},fi=SIG_FK.indexOf('Kronos'),lab={};
+  for(const s of G.list)if(s.v===2&&s.t>t0&&SIG_OK.has(s.dec)){const v=s.f[fi];if(v==null)continue;(lab[v]=lab[v]||[]).push(s.r);}
+  const ls={};for(const v in lab)ls[v]=mstat(lab[v]);
+  let verdict='aún pocos datos: hace falta que Kronos haya opinado sobre al menos 30 señales «a favor» y 15 «en contra» ya resueltas.';
+  const A=lab['a favor'],B=lab['en contra'];
+  if(A&&B&&A.length>=30&&B.length>=15){const mA=ls['a favor'].m,mB=ls['en contra'].m,va=x=>{const m=x.reduce((t,y)=>t+y,0)/x.length;return x.reduce((t,y)=>t+(y-m)**2,0)/Math.max(1,x.length-1);},
+    tt=(mA-mB)/Math.sqrt(va(A)/A.length+va(B)/B.length||1e-9);
+    verdict=tt>=2?`Kronos acierta: las señales que ve «a favor» dan ${mA.toFixed(2)}R de media y las que ve «en contra» ${mB.toFixed(2)}R (t = ${tt.toFixed(1)}). Filtrar las compras con Kronos ayudaría.`
+      :tt<=-2?`Kronos falla: lo que ve «en contra» sale mejor que lo que ve «a favor» (t = ${tt.toFixed(1)}). No conviene filtrar compras con él.`
+      :`sin diferencia clara todavía entre lo que Kronos ve «a favor» (${mA.toFixed(2)}R) y «en contra» (${mB.toFixed(2)}R) (t = ${tt.toFixed(1)}).`;
+    const key=verdict.slice(0,14);if(S.krVerdict!==key){S.krVerdict=key;if(Math.abs(tt)>=2)L(null,'evolve','Kronos · '+verdict);}}
+  return {real,ls,verdict};}
+function krCmpText(){
+  const c=krCmp(),f=s=>s.n?`${s.n} op., ${Math.round(s.w/s.n*100)} % ganadoras, media ${pct(s.m)}, total ${sgn(s.pl)}`:'ninguna';
+  const lab=['a favor','neutral','en contra','sin consultar'].filter(v=>c.ls[v]).map(v=>`${v}: ${c.ls[v].n} señales, ${c.ls[v].m.toFixed(2)}R`).join(' · ');
+  return `En real (30 días): con Kronos ${f(c.real.con)}; sin Kronos ${f(c.real.sin)}. En el laboratorio, según lo que opinaba Kronos: ${lab||'aún sin señales con su opinión'}. Conclusión: ${c.verdict}`;}
+{const p9=protReport;protReport=function(){return p9.apply(this,arguments)+`\nKRONOS · CON FRENTE A SIN:\n  ${krCmpText()}\nCOSTES · CUPOS Y MARCOS:\n  ${costText()}\n`;};}
+{const b9=benchCard;benchCard=function(){b9.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.appendChild)return;
+  let el=document.getElementById('krCmpBox');if(!el){el=document.createElement('div');el.id='krCmpBox';}box.appendChild(el);
+  el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>Kronos · con frente a sin</b>: ${esc(krCmpText())}</p><p class="note" style="margin:8px 0 0"><b>Costes · cupos de hoy</b>: ${esc(costText())}</p>`;}catch(e){}};}

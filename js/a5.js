@@ -38,13 +38,14 @@ function applyCmd(c,a){
       {const n=S.agents.reduce((t,x)=>t+x.positions.length,0);if(n)return no(`Hay ${n} posici${n>1?'ones abiertas':'ón abierta'}: véndela${n>1?'s':''} o espera a que se cierre${n>1?'n':''} antes de reiniciar.`);}
       /* reiniciar el saldo no borra lo aprendido: se conservan la experiencia por activo, los ajustes,
          los parámetros que ha ido afinando el agente original, el cementerio y un resumen de cada etapa anterior */
+      histOf(); /* que las operaciones de esta etapa queden en el historial permanente */
       const prev=S,r0=prev.agents[0],st0=stats(r0),tot=prev.agents.reduce((t,x)=>t+eq(x)+(x.vault||0),0);
       const run={from:prev.startedAt,to:Date.now(),initial:prev.initial,final:tot,pnl:tot-prev.initial,trades:prev.agents.reduce((t,x)=>t+x.closed.length,0),hit:st0.hit,agents:prev.agents.length,maxDD:r0.maxDD};
-      S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo,{prev:null});
+      S=fresh(v,prev.settings,prev.exp);S.agents[0].params=Object.assign({},r0.params);if(r0.evo)S.agents[0].evo=Object.assign({},r0.evo); /* con el historial permanente, el juicio en real de la última automejora sigue tras el reinicio */
       S.runs=(prev.runs||[]).concat([run]).slice(-50);
       /* comparación con no hacer nada: se archiva la de la etapa que termina; la Mezcla de la nueva usa la proporción media de esta */
       {const B=prev.bench;if(B&&B.sum){run.bench={verdict:B.sum.verdict,adv:B.sum.adv,bot:B.sum.per.etapa.bot&&B.sum.per.etapa.bot.ret,rk:B.sum.per.etapa.rk&&B.sum.per.etapa.rk.ret,days:B.sum.days};const e=B.sum.exp;if(e.s+e.c>0)S.benchPrevS=e.s/(e.s+e.c);}
-       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;
+       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;S.hist=prev.hist||[];S.krx=prev.krx;S.cupo=prev.cupo;S.tfOffK=prev.tfOffK;S.krVerdict=prev.krVerdict;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados, el laboratorio de señales y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}

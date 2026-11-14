@@ -107,6 +107,7 @@ async function krFetch(list){
       j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));}
     finally{clearTimeout(to);}
     for(const id in j.results){const i=id.lastIndexOf('|'),k=id.slice(0,i),tf=id.slice(i+1);KR.cache[id]={t:lastT(k,tf),r:j.results[id],at:Date.now()};}
+    try{krSigFill(Object.keys(j.results));}catch(e){} /* la opinión de Kronos queda apuntada en las señales del laboratorio de esa vela */
     const ks=Object.keys(KR.cache);if(ks.length>400)ks.forEach(x=>{if(Date.now()-KR.cache[x].at>2*3600e3)delete KR.cache[x];});
     Object.assign(KR,{ok:true,loading:false,at:Date.now(),ms:Math.round(performance.now()-t0),err:null,model:j.model||'',fake:!!j.fake});KR.asked+=series.length;
   }catch(e){

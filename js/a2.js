@@ -43,8 +43,10 @@ const TG=(m)=>`https://api.telegram.org/bot${nset().token.trim()}/${m}`;
 function tgPost(text){if(!tgReady())return;const body=new URLSearchParams({chat_id:nset().chat.trim(),text,disable_web_page_preview:'true'});
   /* sin leer respuesta: Telegram recibe el mensaje aunque el navegador no deje ver la contestación */
   fetch(TG('sendMessage'),{method:'POST',body,mode:'no-cors'}).catch(()=>{});}
+/* avisos del propio móvil: el permiso se guarda en este dispositivo (en modo servidor los ajustes que se ven son los del servidor) */
+const SYSK='automaton.sys',sysLocal=()=>{try{return localStorage.getItem(SYSK)==='1';}catch(e){return false;}};
 function sysPost(text){
-  const n=nset();if(!n.sys||!('Notification' in window)||Notification.permission!=='granted')return;
+  const n=nset();if(!(n.sys||sysLocal())||!('Notification' in window)||Notification.permission!=='granted')return;
   try{if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration)navigator.serviceWorker.getRegistration().then(r=>{if(r)r.showNotification('Automaton',{body:text,tag:'automaton-'+Date.now()});else new Notification('Automaton',{body:text});}).catch(()=>{});
   else new Notification('Automaton',{body:text});}catch(e){}
 }

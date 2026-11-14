@@ -1,7 +1,7 @@
 'use strict';
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
-   $('sysBtn').textContent=n.sys&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
+   $('sysBtn').textContent=(n.sys||sysLocal())&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
   const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;if($('s4h'))$('s4h').value=s.use4h==='auto'?'auto':s.use4h?'1':'0';['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
@@ -163,12 +163,23 @@ let remErr=null,remAt=0,remFails=0,remOk0=0;
 async function pullRemote(){
   try{const j=await fget(cleanUrl(REM.url)+'/agent/state',REM.key?{headers:{'X-Agent-Key':REM.key}}:undefined,30000); /* el plan gratuito de Render es lento: se le dan 30 s */ /* la clave va en la cabecera, no en la dirección */
     if(!j||!j.S||!valid(j.S))throw new Error(j&&j.error||'el servidor aún no tiene agente');
-    remApply(j,Date.now());remErr=null;remAt=Date.now();remFails=0;
+    remApply(j,Date.now());remErr=null;remAt=Date.now();remFails=0;try{remNotify(j.S.log||[]);}catch(e){}
     /* se guarda la última foto del servidor: al abrir la app se ve eso (con su hora) mientras llega la nueva, no un estado viejo de este móvil */
     if(Date.now()-(remCacheT||0)>60e3){remCacheT=Date.now();try{localStorage.setItem(REMLAST,JSON.stringify(j));}catch(e){}}
   }catch(e){remFails++;remErr=(e&&e.message&&!/^HTTP|fetch|abort/i.test(e.message))?e.message:why(e);throw e;}
 }
 const REMLAST='automaton.remote.last';let remCacheT=0;
+/* modo servidor: el agente opera en el servidor, así que el móvil avisa él mismo de lo nuevo que ve en el Registro
+   (compras, ventas y cambios importantes) cada vez que recibe datos. Funciona mientras la app esté abierta o en segundo plano reciente;
+   con la app cerrada del todo solo llegan los avisos de Telegram. */
+const REMLOGT='automaton.remote.logT';
+function remNotify(log){
+  let last=0;try{last=+localStorage.getItem(REMLOGT)||0;}catch(e){}
+  const top=log.length?log[0].t:0;if(!last){try{localStorage.setItem(REMLOGT,String(top||Date.now()));}catch(e){}return;}
+  const n=nset(),want=e=>e.t>last&&(['open','close'].includes(e.type)?n.ops!==false:['evolve','dead','tier','spawn'].includes(e.type));
+  const nu=log.filter(want).slice(0,12).reverse();if(top>last)try{localStorage.setItem(REMLOGT,String(top));}catch(e){}
+  if(!nu.length)return;sysPost(nu.map(e=>(e.type==='open'?'🟢 ':e.type==='close'?'🔵 ':'⚠️ ')+e.msg).join('\n').slice(0,900));
+}
 function remCached(){try{const j=JSON.parse(localStorage.getItem(REMLAST)||'null');if(j&&j.S&&valid(j.S)){remApply(j,j.at||Date.now());market.src={};return true;}}catch(e){}return false;}
 function remApply(j,now){
     S=j.S;
@@ -288,7 +299,7 @@ $('tgTest').addEventListener('click',async()=>{
 });
 $('sysBtn').addEventListener('click',async()=>{
   if(!('Notification' in window)){tgMsg('Este navegador no tiene avisos. Usa Telegram.',false);return;}
-  try{const p=await Notification.requestPermission();const n=nset();n.sys=p==='granted';save(true);$('sysBtn').textContent=n.sys?'Activados':'Activar';
+  try{const p=await Notification.requestPermission();const n=nset();n.sys=p==='granted';try{localStorage.setItem(SYSK,n.sys?'1':'0');}catch(e){}save(true);$('sysBtn').textContent=n.sys?'Activados':'Activar';
     if(n.sys){sysPost('Avisos activados.');tgMsg('Avisos del navegador activados.',true);}else tgMsg('Permiso denegado. Puedes activarlo en los ajustes del sitio en Chrome.',false);}
   catch(e){tgMsg('No se pudieron activar aquí. Usa Telegram.',false);}
 });

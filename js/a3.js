@@ -900,8 +900,8 @@ function histOf(){
   return S.hist;}
 function histAdd(a,x){
   if(!x)return;const H=S.hist||(S.hist=[]);
-  H.unshift({aid:a.id,sym:x.sym,side:x.side||'long',tf:x.tf,t0:x.t0,t1:x.t1,pct:+(x.pct||0).toFixed(5),pnl:+(x.pnl||0).toFixed(4),R:x.R,kr:x.kr?1:0,ven:x.ven||null,
-    fees:x.fees||0,mfe:x.mfe,half:x.half||0,rs:String(x.reason||'').slice(0,40),user:x.user?1:0});
+  H.unshift({aid:a.id,sym:x.sym,side:x.side||'long',tf:x.tf,t0:x.t0,t1:x.t1,pct:+(x.pct||0).toFixed(5),pnl:+(x.pnl||0).toFixed(4),R:x.R,Rt:x.Rt!=null?x.Rt:null,b:x.b!=null?x.b:null,sc:x.sc!=null?x.sc:null,kp:x.kp||null,kr:x.kr?1:0,ven:x.ven||null,
+    fees:x.fees||0,mfe:x.mfe,mae:x.mae,half:x.half||0,rs:String(x.reason||'').slice(0,40),user:x.user?1:0});
   if(H.length>HIST_MAX)H.length=HIST_MAX;}
 {const c0=closePos;closePos=function(a,p,reason,at,user){histOf();const h=a.closed[0],r=c0.apply(this,arguments);if(a.closed[0]&&a.closed[0]!==h)histAdd(a,a.closed[0]);return r;};}
 
@@ -1023,7 +1023,7 @@ RLAB.unshift(['diferencia compra/venta','diferencia compra/venta demasiado grand
 SIG_FK.push('diferencia compra/venta');
 {const sf2=sigFeat;sigFeat=function(a,an,P){const f=sf2(a,an,P),s=sprOf(an.sym);f['diferencia compra/venta']=band(s==null?null:s*100,[.02,.05,.1,.3],['<0,02 %','0,02-0,05 %','0,05-0,1 %','0,1-0,3 %','0,3 %+']);return f;};}
 /* la diferencia en el momento de entrar queda en la posición y, al cerrar, en el historial */
-{const o6=openPos;openPos=function(a,an,P){const n=a.positions.length,r=o6.apply(this,arguments);if(!r&&a.positions.length>n){const p=a.positions[a.positions.length-1],s=sprOf(an.sym);if(p&&p.sym===an.sym&&s!=null)p.spr=+s.toFixed(6);}return r;};}
+{const o6=openPos;openPos=function(a,an,P){const n=a.positions.length,r=o6.apply(this,arguments);if(!r&&a.positions.length>n){const p=a.positions[a.positions.length-1],s=sprOf(an.sym);if(p&&p.sym===an.sym){if(s!=null)p.spr=+s.toFixed(6);p.sc=an.score;try{p.kp=krOpin(an.sym,an.tf,an.side==='short');}catch(e){}}}return r;};}
 {const c6=closePos;closePos=function(a,p,reason,at,user){const s=p&&p.spr,r=c6.apply(this,arguments);if(s!=null&&S.hist&&S.hist[0]&&S.hist[0].sym===p.sym&&S.hist[0].spr==null)S.hist[0].spr=s;return r;};}
 function sprText(){
   const v=Object.entries(market.spr||{}).filter(([k,x])=>Date.now()-x.t<5*60e3&&uni().includes(k)).map(([k,x])=>[k,x.s]).sort((p,q)=>p[1]-q[1]);
@@ -1121,7 +1121,7 @@ function rlScan(){
   if(R.open.length>600)R.open.splice(0,R.open.length-600);
 }
 function rlResolve(){
-  const R=rlOf(),keep=[],P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,SC={};
+  const R=rlOf(),keep=[],P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,SC={};rlAggInit(R);
   for(const s of R.open){
     const c=kOf(s.tf,s.k);if(!c||c.length<60){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
     const ck=s.tf+'|'+s.k,sr=SC[ck]||(SC[ck]=serie(c)),ef=sr.E[P.emaF]||(sr.E[P.emaF]=ema(sr.c,P.emaF)),es=sr.E[P.emaS]||(sr.E[P.emaS]=ema(sr.c,P.emaS));
@@ -1130,16 +1130,25 @@ function rlResolve(){
     const p={sh,e,r:s.sd,atr:atr0,stop:sh?e+s.sd:e-s.sd,tp:sh?e-P.tpATR*atr0:e+P.tpATR*atr0,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
     let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,pct:fr,res:x.why};break;}}
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
-    R.list.unshift({t:s.t,k:s.k,tf:s.tf,var:s.var,fondo:s.fondo,cat:s.cat,prof:s.prof,r:+out.r.toFixed(3),pct:+out.pct.toFixed(5),res:out.res});
+    const x={t:s.t,k:s.k,tf:s.tf,var:s.var,fondo:s.fondo,cat:s.cat,prof:s.prof,r:+out.r.toFixed(3),pct:+out.pct.toFixed(5),res:out.res};
+    R.list.unshift(x);rlAgg(R,x);
   }
-  R.open=keep;if(R.list.length>1200)R.list.length=1200;
+  /* la lista detallada solo guarda lo último (para ver ejemplos); las cuentas van en resúmenes por día y grupo, sin límite dentro de los 30 días */
+  R.open=keep;if(R.list.length>300)R.list.length=300;
 }
+/* resumen por día y grupo: casos, suma de R, suma de R², ganadoras y suma de % (basta para media, t y reparto por días) */
+const rlGroups=x=>[x.var,`${x.var} · fondo ${x.fondo}`,`${x.var} · ${x.cat}`,`${x.var} · velas de ${x.tf}`,`${x.var} · RSI ${x.prof}`];
+function rlAggInit(R){if(!R.agg){R.agg={};for(const x of R.list.slice().reverse())rlAgg(R,x);}} /* migración: lo que ya había antes de los resúmenes */
+function rlAgg(R,x){const d=dayKey(x.t),A=R.agg||(R.agg={}),D=A[d]||(A[d]={});for(const g of rlGroups(x)){const o=D[g]||(D[g]=[0,0,0,0,0]);o[0]++;o[1]+=x.r;o[2]+=x.r*x.r;if(x.r>0)o[3]++;o[4]+=x.pct;}
+  const keep=dayKey(Date.now()-31*864e5);for(const k in A)if(k<keep)delete A[k];}
 function rlAnalyze(){
-  const R=rlOf(),L0=R.list.filter(x=>Date.now()-x.t<30*864e5),groups={};
-  const add=(name,x)=>{(groups[name]=groups[name]||[]).push(x);};
-  for(const x of L0){add(x.var,x);add(`${x.var} · fondo ${x.fondo}`,x);add(`${x.var} · ${x.cat}`,x);add(`${x.var} · velas de ${x.tf}`,x);add(`${x.var} · RSI ${x.prof}`,x);}
-  const rows=Object.entries(groups).map(([g,v])=>{const st=mstat(v.map(x=>x.r)),sp=sigSpread(v);return {g,...st,pct:v.reduce((t,x)=>t+x.pct,0)/v.length,spread:sp,clear:st.n>=RL_N&&Math.abs(st.t)>=RL_T&&sp.ok};}).sort((x,y)=>y.n-x.n);
-  R.sum={at:Date.now(),n:L0.length,open:R.open.length,rows};
+  const R=rlOf();rlAggInit(R);
+  const from=dayKey(Date.now()-30*864e5),G={};let total=0;
+  for(const d in R.agg){if(d<from)continue;for(const g in R.agg[d]){const o=R.agg[d][g],z=G[g]||(G[g]={n:0,s:0,ss:0,w:0,p:0,days:{}});z.n+=o[0];z.s+=o[1];z.ss+=o[2];z.w+=o[3];z.p+=o[4];z.days[d]=o[0];}}
+  const rows=Object.entries(G).map(([g,z])=>{const n=z.n,m=z.s/n,sd=n>1?Math.sqrt(Math.max(0,(z.ss-n*m*m)/(n-1))):0,t=sd>0?m/(sd/Math.sqrt(n)):0,days=Object.keys(z.days).length,mx=Math.max(...Object.values(z.days))/n;
+    return {g,n,m,t,w:z.w/n,pct:z.p/n,spread:{days,maxShare:mx,ok:days>=3&&mx<=.5},clear:n>=RL_N&&Math.abs(t)>=RL_T&&days>=3&&mx<=.5};}).sort((x,y)=>y.n-x.n);
+  rows.filter(r=>!r.g.includes(' · ')).forEach(r=>total+=r.n);
+  R.sum={at:Date.now(),n:total,open:R.open.length,rows};
   const win=rows.filter(r=>r.clear&&r.m>0).sort((x,y)=>y.t-x.t)[0],key=win?win.g:'';
   if(key&&R.win!==key){R.win=key;L(null,'evolve',`Laboratorio «rebote por RSI»: «${win.g}» gana de forma clara tras costes (${win.n} casos, ${Math.round(win.w*100)} % ganadoras, ${win.m.toFixed(2)}R de media, t = ${win.t.toFixed(1)}). El bot aún no opera con esto: se puede estudiar activarlo.`);}
   else if(!key&&R.win){R.win='';}

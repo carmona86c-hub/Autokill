@@ -95,7 +95,8 @@ async function saveRemote(force) {
   if (!cur || !TOKEN) return;
   let s; try { s = JSON.parse(cur); } catch (e) { return; }
   if (s.settings && s.settings.notify) s.settings.notify.token = '';  /* el repositorio es público: el token de Telegram no se sube */
-  const txt = JSON.stringify(s);
+  /* números con decimales a 10 cifras significativas: el estado ocupa bastante menos y el error es de millonésimas de céntimo */
+  const txt = JSON.stringify(s, (k, v) => typeof v === 'number' && !Number.isInteger(v) && isFinite(v) ? +v.toPrecision(10) : v);
   if (!force && txt === lastSaved) return;
   try {
     const body = { message: 'estado del agente ' + new Date().toISOString(), content: Buffer.from(txt).toString('base64'), branch: BRANCH };

@@ -537,7 +537,9 @@ function routeAdvice(){
   const avg=v=>R.use[v]/R.dt,dem=v=>avg(v)*(1+Math.min(1,R.miss[v]/Math.max(4,R.opens[v]+R.miss[v])))+(R.opens[v]+R.miss[v]>0?1:0);
   let s=dem('IB')/(dem('IB')+dem('BN')||1);const why=[`dinero usado de media: IBKR ${money(avg('IB'))}, Binance ${money(avg('BN'))}`];
   if(R.miss.IB+R.miss.BN)why.push(`le faltó dinero para entrar ${R.miss.IB} veces en IBKR y ${R.miss.BN} en Binance`);
-  const perf=v=>{const c=S.agents.flatMap(a=>a.closed).filter(x=>!x.user&&x.ven===v&&x.t1>R.since);if(c.length<5)return null;const b=c.reduce((t,x)=>t+x.qty*x.entry,0);return b>0?c.reduce((t,x)=>t+x.pnl,0)/b:null;};
+  /* resultado por bróker con el historial permanente (no se pierde al reiniciar el saldo) */
+  const perf=v=>{const H=typeof histOf==='function'?histOf():S.agents.flatMap(a=>a.closed),c=H.filter(x=>!x.user&&x.ven===v&&x.t1>R.since);if(c.length<5)return null;
+    const bs=x=>x.b!=null?x.b:x.qty&&x.entry?x.qty*x.entry:x.pct?Math.abs(x.pnl/x.pct):0,b=c.reduce((t,x)=>t+bs(x),0);return b>0?c.reduce((t,x)=>t+x.pnl,0)/b:null;};
   const pI=perf('IB'),pB=perf('BN');if(pI!=null&&pB!=null){const tl=Math.max(-.1,Math.min(.1,(pI-pB)*3));s+=tl;if(Math.abs(tl)>=.02)why.push(`le va mejor en ${tl>0?'IBKR':'Binance'} (${pct(tl>0?pI:pB)} frente a ${pct(tl>0?pB:pI)} por operación)`);}
   /* mínimos para que las comisiones no se coman la ganancia: en IBKR, al menos dos posiciones de tamaño eficiente si opera allí */
   if(tot>0){if(R.opens.IB+R.miss.IB>0)s=Math.max(s,Math.min(.9,2*IB_EFF.stk/tot));if(R.opens.BN+R.miss.BN>0)s=Math.min(s,Math.max(.1,1-60/tot));}
@@ -560,7 +562,7 @@ function closePos0(a,p,reason,at,user){
   /* recorrido: cuánto llegó a ir a favor (mfe) y en contra (mae), en múltiplos del riesgo inicial (R) */
   const R=p.risk>0?(sh?p.entry-price:price-p.entry)/p.risk:null;
   a.closed.unshift(Object.assign({sym:p.sym,side:p.side||'long',tf:p.tf,entry:p.entry,exit:price,qty:p.qty0||p.qty,pnl,pct:pnl/b0,reason:reason+(p.taken?' · con mitad asegurada':''),t0:p.openedAt,t1:Date.now(),kr:p.kr?1:0,
-    mfe:p.mfe!=null?+p.mfe.toFixed(2):null,mae:p.mae!=null?+p.mae.toFixed(2):null,R:R!=null?+R.toFixed(2):null,half:p.taken?1:0,fund:p.fund?+p.fund.toFixed(4):0,fees:p.fees!=null?+(p.fees+f).toFixed(4):null,venue:(ruleOf(p.sym)||{}).venue||SRCNAME[srcOf(p.sym)],ven:p.ven||null,saved:p.saved!=null?+p.saved.toFixed(4):null,slMoves:p.sl?p.sl.moves:0},user?{user}:{}));
+    mfe:p.mfe!=null?+p.mfe.toFixed(2):null,mae:p.mae!=null?+p.mae.toFixed(2):null,R:R!=null?+R.toFixed(2):null,Rt:p.risk>0&&(p.qty0||p.qty)>0?+(pnl/(p.risk*(p.qty0||p.qty))).toFixed(2):null,b:+b0.toFixed(4),sc:p.sc!=null?p.sc:null,kp:p.kp||null,half:p.taken?1:0,fund:p.fund?+p.fund.toFixed(4):0,fees:p.fees!=null?+(p.fees+f).toFixed(4):null,venue:(ruleOf(p.sym)||{}).venue||SRCNAME[srcOf(p.sym)],ven:p.ven||null,saved:p.saved!=null?+p.saved.toFixed(4):null,slMoves:p.sl?p.sl.moves:0},user?{user}:{}));
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0&&!user)a.cooldown[p.sym]=Date.now()+30*60e3;
   if(user)labAdd(a,p,user,price,pnl);

@@ -2,7 +2,7 @@
 function buildSettings(){
   {const n=nset();$('tgToken').value=n.token||'';$('tgChat').value=n.chat||'';$('nOps').value=n.ops?'1':'0';$('nDaily').value=n.daily?'1':'0';$('nBk').value=n.bk?'1':'0';$('devName').value=S.settings.device||'';
    $('sysBtn').textContent=(n.sys||sysLocal())&&('Notification' in window)&&Notification.permission==='granted'?'Activados':'Activar';}
-  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;if($('s4h'))$('s4h').value=s.use4h==='auto'?'auto':s.use4h?'1':'0';['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
+  const s=S.settings;$('sFee').value=(s.fee*100).toFixed(3);$('sDay').value=((s.maxDay||.03)*100).toFixed(1);$('sSlip').value=(s.slip*100).toFixed(3);$('sUni').value=s.universe;$('sTf').value=s.tf;if($('sStk'))$('sStk').value=s.stockBroker||'ibkr';if($('s4h'))$('s4h').value=s.use4h==='auto'?'auto':s.use4h?'1':'0';['BN','BF','HL'].forEach(x=>$('m'+x).value=s.markets[x]?'1':'0');$('mSh').value=s.shorts?'1':'0';$('mCF').value=s.cryptoFut===false?'0':'1';$('sBroker').value=['ibkr','mix'].includes(s.broker)?s.broker:'ex';$('sPlan').value=s.ibPlan==='fixed'?'fixed':'tiered';$('kUrl').value=kset().url||'';$('kMode').value=kset().mode||'off';$('sRep').value=s.repl?'1':'0';$('sKids').value=s.maxKids;
   const P=S.agents[0].params;
   $('pForm').innerHTML=Object.keys(DEF_PARAMS).map(k=>`<div class="field"><label class="lbl" for="p_${k}">${PLABEL[k]}</label><input id="p_${k}" type="number" step="any" inputmode="decimal" value="${P[k]}"></div>`).join('');
 }
@@ -18,8 +18,10 @@ function applySettings(o){
   if('cryptoFut' in o&&!!o.cryptoFut!==(s.cryptoFut!==false)){s.cryptoFut=!!o.cryptoFut;market.uniAt=0;}
   if(o.broker&&o.broker!==s.broker&&['ibkr','mix','ex'].includes(o.broker)){const was=s.broker;s.broker=o.broker;market.uniAt=0;market.universe=[];
     if(o.broker==='mix'){if(!(s.split>=0))s.split=.7;S.agents.forEach(a=>{a.vr={IB:0,BN:0};a.positions.forEach(p=>{if(!p.ven)p.ven=was==='ex'&&catOf(p.sym)==='Cripto'?'BN':'IB';});});S.route=null;}
-    L(null,'info',o.broker==='ibkr'?'Broker: IBKR. La simulación usa sus comisiones, sus mercados y sus reglas.':o.broker==='mix'?`Broker: IBKR + Binance. Acciones, ETF y divisas en IBKR; cada orden de cripto va al que le salga más barato (Binance contado o IBKR). Saldo repartido: ${Math.round(s.split*100)} % en IBKR y ${Math.round((1-s.split)*100)} % en Binance; la app irá recomendando el reparto.`:'Broker: exchanges (Binance y Hyperliquid directamente).');}
+    L(null,'info',o.broker==='ibkr'?'Broker: IBKR. La simulación usa sus comisiones, sus mercados y sus reglas.':o.broker==='mix'?`Broker: ${IBN()} + Gate EU. Acciones, ETF y divisas en ${IBN()}; cada orden de cripto va al que le salga más barato (Gate EU, 0,10 %, o IBKR). Saldo repartido: ${Math.round(s.split*100)} % en ${IBN()} y ${Math.round((1-s.split)*100)} % en Gate EU; la app irá recomendando el reparto.`:'Broker: exchanges (Binance y Hyperliquid directamente).');}
   if(o.ibPlan&&['tiered','fixed'].includes(o.ibPlan))s.ibPlan=o.ibPlan;
+  if(o.stockBroker&&['ibkr','alpaca'].includes(o.stockBroker)&&o.stockBroker!==(s.stockBroker||'ibkr')){s.stockBroker=o.stockBroker;market.uniAt=0;
+    L(null,'info',o.stockBroker==='alpaca'?'Bróker de acciones: Alpaca (en preparación). Sin comisión por acción, solo la tasa de la SEC en las ventas; admite fracciones por su API; sin cripto ni divisas (la cripto va a Gate EU). En real: falta confirmar que abre cuenta a residentes en España, y cambiar euros a dólares cuesta un 1,5 % al ingresar o retirar (máximo 40 $).':'Bróker de acciones: IBKR (comisión por acción con mínimo por orden; por API solo acciones enteras).');}
   if(o.kronos){const k=kset(),u=cleanUrl(o.kronos.url),m=o.kronos.mode||'off';if(u!==k.url||m!==k.mode){k.url=u;k.mode=m;KR.cache={};KR.err=null;KR.ok=false;}}
   if(o.notify){const nn=nset(),x=o.notify;if(x.token||!REM.on&&!IS_SERVER)nn.token=x.token||'';nn.chat=x.chat||'';nn.ops=!!x.ops;nn.daily=!!x.daily;nn.bk=!!x.bk;}
   if('device' in o)s.device=String(o.device||'').slice(0,60);
@@ -82,7 +84,7 @@ function applyCmd(c,a){
       L(null,'info',v?`Límite de pérdida: ninguna operación perderá más de ${money(v)} si salta su stop (comisiones incluidas). Para conseguirlo compra menos cantidad; el stop sigue donde lo pone el plan.${n?` Ajustadas ${n} posición(es) ya abiertas.`:''} Ojo: si el precio salta de golpe por encima del stop (por ejemplo, una noticia), en real se puede perder algo más.`:'Límite de pérdida quitado: cada operación arriesga lo que marca el plan del agente.');
       return ok(v?'Límite de pérdida '+money(v)+' activo.':'Sin límite de pérdida.');}
     case 'benchundo':return bmUndo(a.k)?ok('Deshecho. No vuelve a tocarlo en un mes.'):no('No hay nada que deshacer.');
-    case 'bnb':{S.settings.bnbFee=!!a.on;L(null,'info',a.on?'Comisiones de Binance pagadas con BNB: 0,075 % en vez de 0,10 %. En real: ten unos 10-20 $ en BNB en tu cuenta de Binance y activa «Usar BNB para pagar comisiones» en su app.':'Comisiones de Binance sin descuento de BNB: 0,10 %.');return ok(a.on?'Descuento BNB activado.':'Descuento BNB desactivado.');}
+    case 'bnb':{if(isMix()&&a.on)return no('En Gate EU no hay descuento por pagar con un token: la comisión es 0,10 %.');S.settings.bnbFee=!!a.on;L(null,'info',a.on?'Comisiones de Binance pagadas con BNB: 0,075 % en vez de 0,10 %. En real: ten unos 10-20 $ en BNB en tu cuenta de Binance y activa «Usar BNB para pagar comisiones» en su app.':'Comisiones de Binance sin descuento de BNB: 0,10 %.');return ok(a.on?'Descuento BNB activado.':'Descuento BNB desactivado.');}
     case 'keep':{S.settings.keepProfit=!!a.on;L(null,'info',a.on?'Apartar el beneficio: activado también en Automático. Lo que el agente gane por encima de su capital se aparta y no se usa para operar.':'Apartar el beneficio: desactivado en Automático. El agente reinvierte lo que gana.');return ok(a.on?'Se apartará el beneficio.':'Se reinvertirá el beneficio.');}
     case 'unvault':{const ag=S.agents[0],v=ag&&ag.vault||0;if(!(v>=.01))return no('No hay nada en la cartera reservada.');
       const x=a.amt==null?v:Math.min(v,Math.round(+a.amt*100)/100);if(!(x>=.01))return no('Pon una cantidad válida.');
@@ -92,11 +94,11 @@ function applyCmd(c,a){
       moveIn(ag,x);ag.released=(ag.released||0)+x;
       L(ag,'reserve',`Liberado de la cartera reservada: ${money(x)} vuelven al capital del agente (capital ahora ${money(ag.initial)}${ag.vault>=.005?', quedan reservados '+money(ag.vault):''}). Tu patrimonio total no cambia.`);
       return ok('Liberados '+money(x)+'. El agente ya opera con '+money(ag.initial)+'.');}
-    case 'split':{if(!isMix())return no('El reparto solo se usa con el bróker «IBKR + Binance».');const v=Math.round(+a.share*100)/100;if(!(v>=0&&v<=1))return no('Pon un porcentaje entre 0 y 100.');
+    case 'split':{if(!isMix())return no('El reparto solo se usa con el bróker «IBKR + exchange».');const v=Math.round(+a.share*100)/100;if(!(v>=0&&v<=1))return no('Pon un porcentaje entre 0 y 100.');
       const old=splitIB();if(Math.abs(v-old)<.005)return ok('Sin cambios.');const tot=S.agents.reduce((t,x)=>t+(x.status==='alive'?eq(x):0),0);
       S.settings.split=v;S.agents.forEach(x=>{x.vr={IB:0,BN:0};});const R=routeOf();R.miss={IB:0,BN:0};R.advAt=Date.now();
-      const mv=Math.abs(v-old)*tot,to=v>old?'IBKR':'Binance',fr=v>old?'Binance':'IBKR';
-      L(null,'info',`Reparto cambiado: ${Math.round(v*100)} % en IBKR y ${Math.round((1-v)*100)} % en Binance (antes ${Math.round(old*100)} / ${Math.round((1-old)*100)}). En real equivale a pasar unos ${money(mv)} de ${fr} a ${to}.`);
+      const mv=Math.abs(v-old)*tot,to=v>old?IBN():BNN(),fr=v>old?BNN():IBN();
+      L(null,'info',`Reparto cambiado: ${Math.round(v*100)} % en ${IBN()} y ${Math.round((1-v)*100)} % en ${BNN()} (antes ${Math.round(old*100)} / ${Math.round((1-old)*100)}). En real equivale a pasar unos ${money(mv)} de ${fr} a ${to}.`);
       return ok(`Reparto aplicado. En real: pasa unos ${money(mv)} de ${fr} a ${to}.`);}
     case 'study':{const r=capStudy(true);return S.capStudy&&r==='hecho'?ok('Estudio actualizado.'):no('No se pudo: '+(r||'el agente no está activo')+'.');}
     case 'report':return ok('Informe listo.',{text:reportFull()});
@@ -390,7 +392,7 @@ $('hPrune').addEventListener('click',async()=>{hOut((await act('prune')).msg);})
 function collectSettings(){
   const n=id=>parseFloat($(id).value),params={};for(const k in DEF_PARAMS)params[k]=$('p_'+k).value;
   return {fee:n('sFee')/100,slip:n('sSlip')/100,maxDay:n('sDay')/100,universe:Math.round(n('sUni')),maxKids:Math.round(n('sKids')),
-    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',broker:$('sBroker').value,ibPlan:$('sPlan').value,
+    markets:{BN:$('mBN').value==='1',BF:$('mBF').value==='1',HL:$('mHL').value==='1'},repl:$('sRep').value==='1',shorts:$('mSh').value==='1',cryptoFut:$('mCF').value==='1',broker:$('sBroker').value,ibPlan:$('sPlan').value,stockBroker:$('sStk')?$('sStk').value:undefined,
     kronos:{url:$('kUrl').value,mode:$('kMode').value},notify:{token:$('tgToken').value.trim(),chat:$('tgChat').value.trim(),ops:$('nOps').value==='1',daily:$('nDaily').value==='1',bk:$('nBk').value==='1'},
     device:$('devName').value.trim(),tf:$('sTf').value,use4h:$('s4h')?($('s4h').value==='auto'?'auto':$('s4h').value==='1'):undefined,params};
 }

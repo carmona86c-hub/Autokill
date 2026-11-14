@@ -171,7 +171,7 @@ const LAG = { max: 0, maxAt: 0, over5: 0, big: [] }; let lagLast = Date.now();
 setInterval(() => { const n = Date.now(), d = n - lagLast - 500; lagLast = n;
   if (d > LAG.max || n - LAG.maxAt > 3600e3) { LAG.max = Math.max(0, d); LAG.maxAt = n; }
   if (d > 5000) { LAG.over5++; LAG.big.unshift([new Date(n).toISOString().slice(11, 19), d]); LAG.big.length = Math.min(LAG.big.length, 8); log('Agente bloqueado', d, 'ms'); } }, 500).unref();
-const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS, kronos: (() => { try { return run('({ok:KR.ok,err:KR.err,asked:KR.asked,ms:KR.ms,loading:!!KR.loading})'); } catch (e) { return null; } })() });
+const diag = () => ({ up_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1048576), lag_max_ms: LAG.max, lag_over5s: LAG.over5, lag_big: LAG.big, state_ms: STATE_MS, kronos: (() => { try { return run('({ok:KR.ok,err:KR.err,asked:KR.asked,ms:KR.ms,loading:!!KR.loading})'); } catch (e) { return null; } })(), gate: (() => { try { return run('({pares:GATE.pairs?Object.keys(GATE.pairs).length:0,err:GATE.err,fallos:GATE.fails})'); } catch (e) { return null; } })() });
 let STATE_MS = 0;
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');

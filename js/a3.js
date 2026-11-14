@@ -831,7 +831,7 @@ function benchCard(){
   <div class="tw" style="margin-top:8px"><table><tr><th>Cartera</th><th>Rentab.</th><th>$</th><th>Peor caída</th><th>Altibajos</th><th>Ganancia por susto</th></tr>${rows}</table></div>
   <p class="note" style="margin:8px 0 0">Tiempo invertido de media: <b>${Math.round((sm.exp.s+sm.exp.c)*100)} %</b> (acciones ${Math.round(sm.exp.s*100)} %, criptos ${Math.round(sm.exp.c*100)} %). ${sm.better!=null?`Días mejores que Mismo riesgo: ${Math.round(sm.better*100)} %.`:''}</p>
   <div class="tw" style="margin-top:6px"><table><tr><th>Por mercado</th><th>Bot</th><th>Mismo riesgo</th><th>Veredicto</th></tr>
-    <tr><td>Acciones (IBKR y Binance)</td><td class="${sp.bS>=0?'up':'down'}">${sgn(sp.bS)}</td><td class="${sp.rS>=0?'up':'down'}">${sgn(sp.rS)}</td><td>${vtxt(sp.vS)} (${sp.nS} op.)</td></tr>
+    <tr><td>Acciones</td><td class="${sp.bS>=0?'up':'down'}">${sgn(sp.bS)}</td><td class="${sp.rS>=0?'up':'down'}">${sgn(sp.rS)}</td><td>${vtxt(sp.vS)} (${sp.nS} op.)</td></tr>
     <tr><td>Criptos</td><td class="${sp.bC>=0?'up':'down'}">${sgn(sp.bC)}</td><td class="${sp.rC>=0?'up':'down'}">${sgn(sp.rC)}</td><td>${vtxt(sp.vC)} (${sp.nC} op.)</td></tr></table></div>
   <p class="note" style="margin:6px 0 0">Cortos: ${sgn(sm.shorts)}.${sm.eur?` En euros, el bot va ${bmPct(sm.eur.bot,2)} (euro/dólar de ${sm.eur.fx0.toFixed(4)} a ${sm.eur.fx.toFixed(4)}).`:''}${sm.limDays?` ${sm.limDays} día(s) con el modo límite: tus ventas cambian el resultado y esos días no cuentan para el veredicto.`:''}</p>
   <p class="note" style="margin:6px 0 0"><b>Prueba del mono:</b> ${M&&M.n?`en ${M.n} operaciones, el bot supera al <b>${Math.round(M.pct*100)} %</b> de 200 monos que entran al azar con sus mismas salidas (necesita 95 %). ${M.n<30?'Aún pocos datos.':M.pct>=.95?'Sus entradas aportan.':M.pct<.05?'Entra peor que al azar.':'No se puede decir que sus entradas aporten.'}`:'se calcula cada madrugada con las operaciones cerradas; aún sin datos.'}</p>
@@ -1027,10 +1027,10 @@ SIG_FK.push('diferencia compra/venta');
 {const c6=closePos;closePos=function(a,p,reason,at,user){const s=p&&p.spr,r=c6.apply(this,arguments);const h=S.hist&&S.hist[0];if(h&&h.sym===p.sym){if(s!=null&&h.spr==null)h.spr=s;if(p.sid&&!h.sid)h.sid=p.sid;}return r;};}
 function sprText(){
   const v=Object.entries(market.spr||{}).filter(([k,x])=>Date.now()-x.t<5*60e3&&uni().includes(k)).map(([k,x])=>[k,x.s]).sort((p,q)=>p[1]-q[1]);
-  if(!v.length)return 'sin datos del libro de órdenes todavía (se piden a Binance una vez por minuto).';
+  if(!v.length)return `sin datos del libro de órdenes todavía (se piden a ${BNN()} una vez por minuto).`;
   const med=v[Math.floor(v.length/2)][1],hi=v.slice(-3).reverse().map(([k,s])=>`${base(k)} ${sprTxt(s)}`).join(', '),over=v.filter(x=>x[1]>SPR_MAX).length;
   const H=histOf().filter(x=>x.spr!=null).slice(0,100),mh=H.length?H.reduce((t,x)=>t+x.spr,0)/H.length:null;
-  return `ahora, en ${v.length} activos de Binance: mediana ${sprTxt(med)}; las más altas ${hi}${over?` (${over} por encima del ${sprTxt(SPR_MAX)}: no se compran)`:''}.`+(mh!=null?` En las últimas ${H.length} operaciones se pagó de media ${sprTxt(mh)} de diferencia al entrar.`:'');}
+  return `ahora, en ${v.length} activos de ${BNN()}: mediana ${sprTxt(med)}; las más altas ${hi}${over?` (${over} por encima del ${sprTxt(SPR_MAX)}: no se compran)`:''}.`+(mh!=null?` En las últimas ${H.length} operaciones se pagó de media ${sprTxt(mh)} de diferencia al entrar.`:'');}
 {const p10=protReport;protReport=function(){return p10.apply(this,arguments)+`\nDIFERENCIA COMPRA/VENTA (libro de órdenes real):\n  ${sprText()}\n`;};}
 
 /* =====================================================================================
@@ -1201,3 +1201,6 @@ function linkText(){
 {const p13=protReport;protReport=function(){const l=linkText();return p13.apply(this,arguments)+`\nENLACES · ¿EL LABORATORIO DICE LA VERDAD?\n  ${l.fid}\nENLACES · OPINIÓN DE KRONOS AL ENTRAR → RESULTADO REAL (30 días)\n  ${l.kp}\n`;};}
 {const b13=benchCard;benchCard=function(){b13.apply(this,arguments);try{const box=document.getElementById('krCmpBox');if(!box)return;const l=linkText();let el=document.getElementById('linkBox');if(!el){el=document.createElement('div');el.id='linkBox';}box.appendChild(el);
   el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>¿El laboratorio dice la verdad?</b> ${esc(l.fid)}</p><p class="note" style="margin:8px 0 0"><b>Opinión de Kronos al entrar → resultado real</b>: ${esc(l.kp)}</p>`;}catch(e){}};}
+
+/* el cambio de Binance a Gate EU queda en el diario de cambios (una vez) */
+{const s9=sigTick;sigTick=function(){s9.apply(this,arguments);try{if(S.settings.gateV1&&isMix()&&!S.gateJ){S.gateJ=1;jAdd('bot','exchange','Cambio de exchange: Binance → Gate EU (Binance no deja operar desde España desde el 1 jul 2026). Comisión 0,10 % al comprar y al vender, pares USDC, sin BNB ni acciones tokenizadas.');}}catch(e){}};}

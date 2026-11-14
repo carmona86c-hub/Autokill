@@ -19,6 +19,11 @@ async function send(order, log) {
   const [method, path] = r.api.split(' ');
   if (!path || !path.startsWith('/')) { log('Sin envío: ' + r.api); return; }
   if (path.startsWith('/iserver/')) { log('Orden real NO enviada: IBKR aún no está conectado:', order.sym); return; }
+  /* Gate EU y Alpaca: conectores preparados en la simulación (formato de sus órdenes), aún sin firma ni envío real */
+  if (path.startsWith('/api/v4/')) { log('Orden real NO enviada: Gate EU aún no está conectado:', order.sym); return; }
+  if (path.startsWith('/v2/')) { log('Orden real NO enviada: Alpaca aún no está conectado:', order.sym); return; }
+  /* Binance ya no opera con clientes de la UE (desde el 1 de julio de 2026): nada se envía a Binance */
+  if (path.startsWith('/api/') || path.startsWith('/sapi/') || path.startsWith('/fapi/')) { log('Orden real NO enviada: Binance no opera con clientes de la UE desde el 1 jul 2026:', order.sym); return; }
   /* de /sapi/ solo se permite la transferencia interna Spot <-> Funding (apartar beneficio); nunca retiradas */
   if (path.startsWith('/sapi/') && path !== '/sapi/v1/asset/transfer') { log('Orden real NO enviada: ruta no permitida', path); return; }
   if (!path.startsWith('/api/') && !path.startsWith('/fapi/') && !path.startsWith('/sapi/')) { log('Orden real NO enviada (Hyperliquid aún no tiene firma de cartera):', order.sym); return; }

@@ -23,6 +23,9 @@ function migrate(s){
   /* broker IBKR (una sola vez): la simulación sigue sus comisiones, mercados y reglas */
   if(s.settings.tf4V1===undefined){s.settings.tf4V1=1;s.settings.use4h='auto';}
   if(s.settings.bnbV1===undefined){s.settings.bnbV1=1;s.settings.bnbFee=true;}
+  /* Binance dejó de operar con clientes de la UE (1 jul 2026): en «IBKR + exchange» el exchange pasa a ser Gate EU */
+  if(!s.settings.gateV1){s.settings.gateV1=1;if(s.settings.broker==='mix'){s.settings.bnbFee=false;s.settings.gateFee=.001;
+    (s.log=s.log||[]).unshift({t:Date.now(),a:'Sistema',type:'evolve',msg:'Cambio de exchange: Binance no deja operar desde España desde el 1 de julio de 2026 (sin licencia MiCA; cierra las cuentas el 31 de diciembre). La cripto pasa a Gate EU (licencia MiCA de Malta): comisión 0,10 % al comprar y al vender, pares en USDC, sin descuento por BNB y sin acciones tokenizadas. Las posiciones abiertas terminan con sus reglas.'});}}
   if(s.settings.broker===undefined){s.settings.broker='ibkr';s.settings.ibPlan='tiered';}
   /* IBKR + Binance (una sola vez): lo que ya estaba abierto se compró en IBKR y ahí sigue */
   if(!s.settings.mixV1){s.settings.mixV1=1;if(s.settings.broker==='ibkr'){s.settings.broker='mix';s.settings.split=.7;s.agents.forEach(a=>{a.vr={IB:0,BN:0};(a.positions||[]).forEach(p=>{p.ven='IB';});});s.route=null;(s.log=s.log||[]).unshift({t:Date.now(),a:'Sistema',type:'info',msg:'Bróker: IBKR + Binance. Acciones, ETF y divisas siguen en IBKR; cada orden de cripto va al más barato. Saldo repartido 70 % IBKR / 30 % Binance para empezar; la app recomendará el reparto con los datos (Estadísticas → Reparto entre brókers).'});}}
@@ -261,10 +264,41 @@ const isIB=()=>!!(S&&(S.settings.broker==='ibkr'||S.settings.broker==='mix'));
    El saldo está repartido como lo estaría en real: una parte en IBKR y otra en Binance. Cada bolsillo guarda lo que gana o pierde
    hasta que se cambia el reparto (que en real sería una transferencia que haces tú). */
 const isMix=()=>!!(S&&S.settings.broker==='mix');
-const VN={IB:'IBKR',BN:'Binance',EX:'exchange'};
+/* ===== nombres de los brókers según el modo =====
+   Desde el 1 de julio de 2026 Binance no deja operar a clientes de la UE (sin licencia MiCA; cierra las cuentas
+   españolas el 31 de diciembre). En el modo «IBKR + exchange» el exchange de cripto es ahora GATE EU
+   (Gate Technology Ltd, licencia MiCA de Malta, pares en USDC). Los precios y velas siguen viniendo de los datos
+   públicos de Binance (mismo mercado, diferencias de céntimos); comisiones, pares, mínimos y diferencia
+   compra/venta son los de Gate EU. Las acciones van a IBKR o, si lo eliges, a ALPACA (preparado). */
+const isAlpaca=()=>!!(S&&S.settings&&S.settings.stockBroker==='alpaca');
+const BNN=()=>isMix()?'Gate EU':'Binance',IBN=()=>isAlpaca()?'Alpaca':'IBKR';
+const VN={get IB(){return IBN();},get BN(){return BNN();},EX:'exchange'};
+try{Object.defineProperty(SRCNAME,'BN',{get:()=>BNN(),configurable:true});}catch(e){}
+/* ===== GATE EU: lista de pares USDC, mínimos y diferencia compra/venta reales (API pública, sin clave) ===== */
+const GATE_API='https://api.gateio.ws/api/v4';
+const GATE={pairs:null,at:0,tAt:0,err:null,fails:0};
+const gateFee=()=>S.settings.gateFee>0?S.settings.gateFee:.001; /* 0,10 % comprador y vendedor (nivel VIP 0) */
+function gatePairs(){if(!GATE.pairs&&S&&S.gatePairs&&S.gatePairs.m)GATE.pairs=S.gatePairs.m;return GATE.pairs;}
+const gatePair=k=>{const m=gatePairs();return m?m[ubase(k)]||null:null;};
+const gateOK=k=>srcOf(k)==='BN'&&!isBS(k)&&!!gatePair(k); /* solo lo que Gate EU tiene en USDC; sin lista todavía, nada (como en real) */
+async function gateSync(){
+  if(!isMix())return;const now=Date.now();
+  if(now-GATE.at>(GATE.pairs?6*3600e3:5*60e3)){GATE.at=now;
+    try{const j=await fget(GATE_API+'/spot/currency_pairs',undefined,25000);if(!Array.isArray(j)||!j.length)throw new Error('lista vacía');const m={};
+      for(const x of j)if(String(x.quote).toUpperCase()==='USDC'&&x.trade_status==='tradable')m[String(x.base).toUpperCase()]={id:x.id,minQ:+x.min_quote_amount||3,minB:+x.min_base_amount||0,ap:+x.amount_precision,pp:+x.precision};
+      if(!Object.keys(m).length)throw new Error('sin pares USDC');
+      const first=!GATE.pairs;GATE.pairs=m;GATE.err=null;GATE.fails=0;S.gatePairs={at:now,m};if(first)market.uniAt=0; /* se rehace la lista de activos con lo que hay en Gate EU */
+    }catch(e){GATE.err=why(e);GATE.fails++;}}
+  if(GATE.pairs&&now-GATE.tAt>60e3){GATE.tAt=now;
+    try{const j=await fget(GATE_API+'/spot/tickers',undefined,25000);if(Array.isArray(j)){const by={};for(const x of j)by[x.currency_pair]=x;
+      for(const k of uni()){if(srcOf(k)!=='BN')continue;const g=gatePair(k);if(!g)continue;const x=by[g.id];if(!x)continue;const b=+x.highest_bid,a=+x.lowest_ask;
+        if(b>0&&a>=b)market.spr[k]={s:(a-b)/((a+b)/2),b,a,t:now,src:'Gate EU'};}}}catch(e){}}
+}
+
 let VCTX=null;
 function inV(v,fn){const o=VCTX;VCTX=v;try{return fn();}finally{VCTX=o;}}
-const vensOf=k=>!isMix()?[isIB()?'IB':'EX']:catOf(k)!=='Cripto'?['IB']:[...(srcOf(k)==='BN'?['BN']:[]),...(IB_CRYPTO.has(base(k))?['IB']:[])];
+/* con Alpaca no hay cripto ni divisas en el bróker de acciones: la cripto va solo a Gate EU */
+const vensOf=k=>!isMix()?[isIB()?'IB':'EX']:catOf(k)!=='Cripto'?['IB']:[...(gateOK(k)?['BN']:[]),...(!isAlpaca()&&IB_CRYPTO.has(base(k))?['IB']:[])];
 function venOf(k){if(VCTX)return VCTX;if(isMix())for(const a of S.agents)for(const p of a.positions)if(p.sym===k&&p.ven)return p.ven;return vensOf(k)[0]||'IB';}
 const onIB=k=>isIB()&&venOf(k)==='IB';
 const splitIB=()=>{const v=S&&S.settings.split;return v>=0&&v<=1?v:.7;};
@@ -276,17 +310,19 @@ const ibClass=k=>{const c=catOf(k);return c==='Cripto'?'crypto':c==='Divisas'?'f
    Tampoco empresas que no cotizan en EE. UU. (coreanas, chinas, aún sin salir a bolsa). */
 const IB_NOT_US=new Set(['SKHY','SMSN','ANT','UNITREE','OPENAI','XAI','ANTHROPIC','KIOXIA','BYTEDANCE','STRIPE','DATABRICKS']);
 function ibOK(k){const m=metaOf(k)||{},c=catOf(k);if(c==='Cripto')return isMix()?vensOf(k).length>0:IB_CRYPTO.has(base(k));
+  if(c==='Divisas'&&isAlpaca())return false; /* Alpaca no opera divisas */
   if(c==='Índices'||c==='Materias primas'||c==='TradFi'||isCom(base(k)))return false;if(c==='Acciones'&&IB_NOT_US.has(String(base(k)).toUpperCase()))return false;
   return !['hk','krx','shanghai'].includes(m.sess);}
 const IB_MARGIN=2000;
 const marginOK=()=>S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0)*(isMix()?splitIB():1)>=IB_MARGIN;
 /* Binance contado con «pagar comisiones con BNB»: 25 % menos (0,10 % → 0,075 %). En real hay que tener algo de BNB en la cuenta y la opción activada en Binance. */
-const feeRate0=k=>S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1)*(srcOf(k)==='BN'&&S.settings.bnbFee?.75:1);
+const feeRate0=k=>isMix()&&srcOf(k)==='BN'?gateFee():S.settings.fee*({BN:1,BF:.5,HL:.9}[srcOf(k)]||1)*(srcOf(k)==='BN'&&S.settings.bnbFee?.75:1);
 /* comisión real en dólares de una orden: q unidades a price; sell=true si la orden vende */
 function feeAmt(k,q,price,sell){
   const V=q*price;if(!(V>0))return 0;
   if(!onIB(k))return V*feeRate0(k);
   const cl=ibClass(k);
+  if(isAlpaca())return (sell?.0000206*V:0)+.000003*q; /* Alpaca: 0 $ de comisión; solo la tasa de la SEC (ventas) y la CAT */
   if(cl==='crypto')return Math.max(.0018*V,Math.min(1.75,.01*V));
   if(cl==='fx')return Math.max(2,.00002*V);
   const reg=sell?.0000206*V+.000003*q:0; /* tasa de la SEC y CAT en las ventas */
@@ -297,7 +333,7 @@ function feeAmt(k,q,price,sell){
    la posición sube hasta un tamaño eficiente (cripto ~$700, acciones ~$350, divisas ~$10.000), como mucho la mitad del capital.
    El riesgo no cambia: lo sigue marcando el stop (riesgo por operación), solo hay menos posiciones y más grandes. */
 const IB_EFF={crypto:700,stk:350,fx:10000};
-function posCap(k,e,P){const b=e*P.maxPosPct;return onIB(k)?Math.max(b,Math.min(e*.5,IB_EFF[ibClass(k)]||0)):b;}
+function posCap(k,e,P){const b=e*P.maxPosPct;return onIB(k)&&!isAlpaca()?Math.max(b,Math.min(e*.5,IB_EFF[ibClass(k)]||0)):b;} /* Alpaca no tiene mínimo por orden */
 /* coste por unidad con el tamaño que tendría la posición: con mínimos por orden, las posiciones pequeñas pagan mucho más en proporción */
 function feeOf(k){
   if(!onIB(k))return feeRate0(k);
@@ -308,13 +344,15 @@ function feeOf(k){
    ruleOf: paso de cantidad, mínimos y paso de precio del exchange de ese activo (si aún no han llegado, se usan los de Binance: $5).
    Las cantidades se redondean hacia abajo al paso permitido, como haría el exchange; una orden que el exchange rechazaría, aquí también se rechaza. */
 function ruleOf(k){
+  if(onIB(k)&&isAlpaca())return {step:1e-9,minNot:1,tick:(market.price[k]||0)>=1?.01:.0001,venue:'Alpaca · acciones EE. UU. (fracciones)'};
+  if(isMix()&&srcOf(k)==='BN'&&!onIB(k)){const g=gatePair(k);if(g)return {step:Math.pow(10,-(g.ap>=0?g.ap:8)),minNot:Math.max(1,g.minQ),minQty:g.minB||0,tick:Math.pow(10,-(g.pp>=0?g.pp:8)),venue:'Gate EU contado ('+g.id+')'};}
   if(onIB(k)){const cl=ibClass(k),p=market.price[k]||0;
     return cl==='crypto'?{step:1e-8,minNot:1,venue:'IBKR · cripto'}:cl==='fx'?{step:1,minNot:1,venue:'IBKR · divisas'}:{step:1,minQty:1,minNot:1,tick:p>=1?.01:.0001,venue:'IBKR · '+(catOf(k)==='Acciones'?'acciones EE. UU.':'ETF EE. UU.')};}
   return (market.rules&&market.rules[k])||(S.meta&&S.meta[k]&&S.meta[k].rule)||null;
 }
 /* en IBKR los cortos de acciones van por acciones enteras */
 /* IBKR solo admite fracciones de acción desde sus apps, no por programa (su API): un bot real solo puede comprar y vender acciones enteras */
-const wholeOnly=(k,sh)=>onIB(k)&&ibClass(k)==='stk';
+const wholeOnly=(k,sh)=>onIB(k)&&ibClass(k)==='stk'&&!isAlpaca(); /* Alpaca sí admite fracciones por su API (órdenes a mercado y del día) */
 /* dinero disponible: en cuenta de efectivo, lo que viene de vender acciones no se puede usar hasta que se liquida (día hábil siguiente) */
 function freeCash(a){const n=Date.now();if(a.unset)a.unset=a.unset.filter(x=>x.at>n);return a.cash-(a.unset||[]).reduce((t,x)=>t+x.amt,0);}
 function settle(a,p,amt){if(onIB(p.sym)&&ibClass(p.sym)==='stk'&&!marginOK()&&amt>0){const at=nextOpen('us',Date.now()+3600e3);if(at)(a.unset=a.unset||[]).push({amt,at});}}
@@ -334,6 +372,10 @@ const canShort=k=>!!S.settings.shorts&&(onIB(k)?ibClass(k)!=='crypto'&&marginOK(
 /* la orden tal y como se enviaría al exchange (en simulación se guarda, no se envía) */
 function ticket(k,side,q,kind,price){
   const v=srcOf(k),id=idOf(k),r=ruleOf(k)||{},qs=q.toFixed(decOf(r.step)),red=kind!=='abrir';
+  if(onIB(k)&&isAlpaca())return {api:'POST /v2/orders',p:Object.assign({symbol:base(k),side:side.toLowerCase(),type:'market',time_in_force:'day'},side==='BUY'&&kind==='abrir'?{notional:+(q*price).toFixed(2)}:{qty:qs})};
+  if(isMix()&&v==='BN'&&!onIB(k)){const g=gatePair(k)||{id:ubase(k)+'_USDC'};
+    /* Gate: en una compra a mercado la cantidad va en USDC; en una venta, en la moneda */
+    return {api:'POST /api/v4/spot/orders',p:{currency_pair:g.id,side:side.toLowerCase(),type:'market',amount:side==='BUY'?(q*price).toFixed(2):qs,time_in_force:'ioc',account:'spot'}};}
   if(onIB(k)){const cl=ibClass(k),o={ticker:base(k),secType:cl==='crypto'?'CRYPTO':cl==='fx'?'CASH':'STK',orderType:'MKT',side,tif:cl==='crypto'?'IOC':'DAY'};
     if(cl==='crypto'&&side==='BUY')o.cashQty=+(q*price).toFixed(2);else o.quantity=+qs;
     return {api:'POST /iserver/account/{cuenta}/orders',p:{orders:[o]}};}
@@ -343,6 +385,9 @@ function ticket(k,side,q,kind,price){
 }
 function stopTicket(p){
   const v=srcOf(p.sym),id=idOf(p.sym),r=ruleOf(p.sym)||{},side=isShort(p)?'BUY':'SELL',sp=String(rp(p.sym,p.stop)),qs=p.qty.toFixed(decOf(r.step));
+  if(onIB(p.sym)&&isAlpaca())return {api:'POST /v2/orders',p:{symbol:base(p.sym),side:side.toLowerCase(),type:'stop',stop_price:+sp,qty:qs,time_in_force:'day'}};
+  if(isMix()&&v==='BN'&&!onIB(p.sym)){const g=gatePair(p.sym)||{id:ubase(p.sym)+'_USDC'};
+    return {api:'POST /api/v4/spot/price_orders',p:{market:g.id,trigger:{price:sp,rule:isShort(p)?'>=':'<=',expiration:86400*30},put:{type:'market',side:side.toLowerCase(),price:'0',amount:qs,account:'normal',time_in_force:'ioc'}}};}
   if(onIB(p.sym)){const cl=ibClass(p.sym);if(cl==='crypto')return {api:'(la app vigila el stop y envía una orden de mercado al tocarlo)',p:{ticker:base(p.sym),stop:+sp}};
     return {api:'POST /iserver/account/{cuenta}/orders',p:{orders:[{ticker:base(p.sym),secType:cl==='fx'?'CASH':'STK',orderType:'STP',price:+sp,side,quantity:+qs,tif:'GTC'}]}};}
   if(v==='BN')return {api:'POST /api/v3/order',p:{symbol:id,side,type:'STOP_LOSS',quantity:qs,stopPrice:sp}};
@@ -428,12 +473,13 @@ function sweep(a){
 /* la orden real equivalente de apartar (o liberar) beneficio, para que quede igual que en un bróker de verdad */
 function logVault(a,v,amt,out){
   const am=(Math.floor(amt*100)/100).toFixed(2);
-  const req=v==='BN'?{api:'POST /sapi/v1/asset/transfer',p:{type:out?'MAIN_FUNDING':'FUNDING_MAIN',asset:'USDT',amount:am}}
+  const req=v==='BN'&&isMix()?{api:'(Gate EU no tiene cartera aparte para esto: el dinero se queda en la cuenta y la app no lo usa'+(out?'. Para sacarlo: Gate EU → Retirar → euros por SEPA)':')'),p:{currency:'USDC',amount:+am}}
+    :v==='BN'?{api:'POST /sapi/v1/asset/transfer',p:{type:out?'MAIN_FUNDING':'FUNDING_MAIN',asset:'USDT',amount:am}}
     :v==='IB'?{api:'(IBKR no mueve dinero por API: el dinero se queda en la cuenta y la app no lo usa'+(out?'. Para sacarlo: IBKR → Transferir y pagar → Retirar fondos)':')'),p:{currency:'USD',amount:+am}}
     :{api:'(la app no lo usa para operar; el dinero sigue en la cuenta del exchange)',p:{amount:+am}};
-  const o={t:Date.now(),ag:a.name,sym:'USD',venue:v==='BN'?(out?'Binance · Spot → Funding':'Binance · Funding → Spot'):v==='IB'?'IBKR · apartado en la cuenta':'Exchange',kind:out?'apartar':'liberar',side:out?'OUT':'IN',qty:+am,price:1,fee:0,mode:'simulada',req};
+  const o={t:Date.now(),ag:a.name,sym:'USD',venue:v==='BN'?(isMix()?'Gate EU · apartado en la cuenta':out?'Binance · Spot → Funding':'Binance · Funding → Spot'):v==='IB'?IBN()+' · apartado en la cuenta':'Exchange',kind:out?'apartar':'liberar',side:out?'OUT':'IN',qty:+am,price:1,fee:0,mode:'simulada',req};
   ordersOf().unshift(o);if(S.orders.length>300)S.orders.length=300;
-  if(S.settings.exec==='real'&&v==='BN'&&typeof __liveSend==='function'){o.mode='real';try{__liveSend(o);}catch(e){o.err=String(e&&e.message||e);}}
+  if(S.settings.exec==='real'&&v==='BN'&&!isMix()&&typeof __liveSend==='function'){o.mode='real';try{__liveSend(o);}catch(e){o.err=String(e&&e.message||e);}}
 }
 /* lo que quedaría limpio si se vendiera ahora: precio con deslizamiento, menos la comisión de venta y menos lo que costó entrar (con su comisión) */
 function netIfClose(p,mkt){return inV(p.ven||null,()=>netIfClose0(p,mkt));}
@@ -483,14 +529,15 @@ function sizeOn(a,an,P,cash){
 const rtFee=(v,k,q,px,sh)=>inV(v,()=>feeAmt(k,q,px,sh)+feeAmt(k,q,px,!sh));
 /* la misma acción en Binance (bStock, respaldada 1 a 1): con IBKR + Binance es otra vía para comprarla, por trozos.
    Se usa su precio real en Binance; la distancia del stop y del objetivo se escala a ese precio. */
-function bsAlt(k){if(!isMix()||srcOf(k)==='BN'||catOf(k)!=='Acciones')return null;const n=String(base(k)).toUpperCase()+'B';
+function bsAlt(k){return null; /* las acciones tokenizadas eran de Binance (ya no disponible en España); Gate EU no las tiene */
+  if(!isMix()||srcOf(k)==='BN'||catOf(k)!=='Acciones')return null;const n=String(base(k)).toUpperCase()+'B';
   return (market.lists.BN||[]).find(x=>srcOf(x)==='BN'&&String(base(x)).toUpperCase()===n&&isBS(x))||null;}
 function bsAn(an){const k=bsAlt(an.sym);if(!k||!pxFresh(k,90000)||!(an.price>0))return null;const p=market.price[k],f=p/an.price;
   return Object.assign({},an,{sym:k,price:p,last:an.last*f,atr:an.atr*f,atrPct:an.atrPct,tick:0,sessAs:sessOf(an.sym)==='24x7'?null:sessOf(an.sym),via:an.sym});}
 function openPos(a,an,P){
   if(!isMix()){const r=sizeOn(a,an,P,freeCash(a));return r.err||openOn(a,an,P,r,null,null);}
   const ways=[...(ibOK(an.sym)?vensOf(an.sym).map(v=>({v,an})):[])];{const b=bsAn(an);if(b)ways.push({v:'BN',an:b});}
-  const vs=ways.map(w=>w.v);if(!vs.length)return 'no disponible en IBKR ni en Binance';
+  const vs=ways.map(w=>w.v);if(!vs.length)return `no disponible en ${IBN()} ni en ${BNN()}`;
   const R=routeOf(),tries=ways.map(w=>({v:w.v,an:w.an,r:inV(w.v,()=>sizeOn(a,w.an,P,freeV(a,w.v)))}));
   /* el bróker que sería más barato para el tamaño que quiere el agente: si ahí faltó dinero, cuenta para recomendar el reparto */
   const pref=vs.length>1?ways.slice().sort((x,y)=>inV(x.v,()=>feeOf(x.an.sym))-inV(y.v,()=>feeOf(y.an.sym)))[0].v:vs[0];
@@ -530,15 +577,15 @@ function routeTrack(){
   const c={IB:0,BN:0};S.agents.forEach(a=>{if(a.status!=='alive')return;a.positions.forEach(p=>{const v=p.ven||venOf(p.sym);c[v]=(c[v]||0)+p.basis;});});
   R.use.IB+=c.IB*dt;R.use.BN+=c.BN*dt;R.dt+=dt;R.peak.IB=Math.max(R.peak.IB,c.IB);R.peak.BN=Math.max(R.peak.BN,c.BN);
   /* una vez al día, si el reparto recomendado se aleja 10 puntos o más del actual, avisa */
-  if(n-R.advAt>=24*3600e3){const ad=routeAdvice();if(ad.ready&&Math.abs(ad.share-splitIB())>=.1){R.advAt=n;const t=`Reparto entre brókers: conviene pasar a ${Math.round(ad.share*100)} % en IBKR y ${Math.round((1-ad.share)*100)} % en Binance (ahora ${Math.round(splitIB()*100)} / ${Math.round((1-splitIB())*100)}). ${ad.why}. Se aplica en Estadísticas → Reparto entre brókers.`;L(null,'info',t);try{tgPost('💼 Automaton · '+t);}catch(e){}}}
+  if(n-R.advAt>=24*3600e3){const ad=routeAdvice();if(ad.ready&&Math.abs(ad.share-splitIB())>=.1){R.advAt=n;const t=`Reparto entre brókers: conviene pasar a ${Math.round(ad.share*100)} % en ${IBN()} y ${Math.round((1-ad.share)*100)} % en ${BNN()} (ahora ${Math.round(splitIB()*100)} / ${Math.round((1-splitIB())*100)}). ${ad.why}. Se aplica en Estadísticas → Reparto entre brókers.`;L(null,'info',t);try{tgPost('💼 Automaton · '+t);}catch(e){}}}
 }
 /* reparto recomendado: según dónde ha tenido metido el dinero el agente, dónde le faltó para entrar y qué le está dando mejor resultado */
 function routeAdvice(){
   const R=routeOf(),tot=S.agents.reduce((t,a)=>t+(a.status==='alive'?eq(a):0),0),cur=splitIB(),h=R.dt/3600e3,tries=R.opens.IB+R.opens.BN+R.miss.IB+R.miss.BN;
   if(h<6||tries<8)return {ready:false,share:cur,tot,why:`aún pocos datos: ${tries} intentos de compra en ${h<1?Math.round(h*60)+' min':Math.round(h)+' h'} (necesita unas 6 h y 8 intentos)`};
   const avg=v=>R.use[v]/R.dt,dem=v=>avg(v)*(1+Math.min(1,R.miss[v]/Math.max(4,R.opens[v]+R.miss[v])))+(R.opens[v]+R.miss[v]>0?1:0);
-  let s=dem('IB')/(dem('IB')+dem('BN')||1);const why=[`dinero usado de media: IBKR ${money(avg('IB'))}, Binance ${money(avg('BN'))}`];
-  if(R.miss.IB+R.miss.BN)why.push(`le faltó dinero para entrar ${R.miss.IB} veces en IBKR y ${R.miss.BN} en Binance`);
+  let s=dem('IB')/(dem('IB')+dem('BN')||1);const why=[`dinero usado de media: ${IBN()} ${money(avg('IB'))}, ${BNN()} ${money(avg('BN'))}`];
+  if(R.miss.IB+R.miss.BN)why.push(`le faltó dinero para entrar ${R.miss.IB} veces en ${IBN()} y ${R.miss.BN} en ${BNN()}`);
   /* resultado por bróker con el historial permanente (no se pierde al reiniciar el saldo) */
   const perf=v=>{const H=typeof histOf==='function'?histOf():S.agents.flatMap(a=>a.closed),c=H.filter(x=>!x.user&&x.ven===v&&x.t1>R.since);if(c.length<5)return null;
     const bs=x=>x.b!=null?x.b:x.qty&&x.entry?x.qty*x.entry:x.pct?Math.abs(x.pnl/x.pct):0,b=c.reduce((t,x)=>t+bs(x),0);return b>0?c.reduce((t,x)=>t+x.pnl,0)/b:null;};
@@ -550,9 +597,9 @@ function routeAdvice(){
 }
 function routeReport(){
   if(!isMix())return '';const R=routeOf(),ad=routeAdvice(),a=S.agents.filter(x=>x.status==='alive'),sum=v=>a.reduce((t,x)=>t+vtot(x,v),0);
-  return `\nREPARTO ENTRE BRÓKERS (IBKR ${Math.round(splitIB()*100)} % · Binance ${Math.round((1-splitIB())*100)} %)\n`+
-    `  IBKR ${money(sum('IB'))} · Binance ${money(sum('BN'))} · órdenes abiertas: ${R.opens.IB} en IBKR, ${R.opens.BN} en Binance · máximo usado a la vez: IBKR ${money(R.peak.IB)}, Binance ${money(R.peak.BN)}`+
-    `\n  ahorro por elegir el más barato: ${sgn(R.saved)} en ${R.nSaved} órdenes con dos opciones · recomendado: ${ad.ready?Math.round(ad.share*100)+' % IBKR / '+Math.round((1-ad.share)*100)+' % Binance ('+ad.why+')':ad.why}`;
+  return `\nREPARTO ENTRE BRÓKERS (${IBN()} ${Math.round(splitIB()*100)} % · ${BNN()} ${Math.round((1-splitIB())*100)} %)\n`+
+    `  ${IBN()} ${money(sum('IB'))} · ${BNN()} ${money(sum('BN'))} · órdenes abiertas: ${R.opens.IB} en ${IBN()}, ${R.opens.BN} en ${BNN()} · máximo usado a la vez: ${IBN()} ${money(R.peak.IB)}, ${BNN()} ${money(R.peak.BN)}`+
+    `\n  ahorro por elegir el más barato: ${sgn(R.saved)} en ${R.nSaved} órdenes con dos opciones · recomendado: ${ad.ready?Math.round(ad.share*100)+' % '+IBN()+' / '+Math.round((1-ad.share)*100)+' % '+BNN()+' ('+ad.why+')':ad.why}`;
 }
 /* user: 'limit' (tu límite de ganancia) o 'manual' (vendida por ti). Esas ventas no cuentan en el aprendizaje del agente:
    van a tu registro aparte, donde se sigue el precio para saber qué habría hecho el plan del agente */
@@ -652,7 +699,7 @@ function decide(a,an,P,T,pre){
   const sh=an.side==='short';
   if(sh&&!S.settings.shorts)return 'cortos desactivados';
   if(sh&&!canShort(an.sym))return isIB()?(ibClass(an.sym)==='crypto'?'IBKR no permite cortos en cripto':'cortos solo con cuenta de margen (desde $2.000)'):'en contado no se puede vender en corto';
-  if(isIB()&&!ibOK(an.sym)&&!bsAlt(an.sym))return isMix()?'no disponible en IBKR ni en Binance con ese nombre':'no disponible en IBKR con ese nombre';
+  if(isIB()&&!ibOK(an.sym)&&!bsAlt(an.sym))return isMix()?`no disponible en ${IBN()} ni en ${BNN()} con ese nombre`:'no disponible en IBKR con ese nombre';
   if(!an.trend)return sh?'sin tendencia bajista':'sin tendencia alcista';
   if(!sh&&an.rsi>P.rsiMax)return `RSI ${an.rsi.toFixed(0)} sobrecomprado`;
   if(!sh&&an.rsi<P.rsiMin)return `RSI ${an.rsi.toFixed(0)} sin fuerza`;

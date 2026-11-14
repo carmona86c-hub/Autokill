@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const vm = require('vm');
+const crypto = require('crypto');
 
 const WEB = process.env.WEB_DIR || path.join(__dirname, '..', 'js');
 const PORT = +(process.env.AGENT_PORT || 7000);
@@ -177,6 +178,21 @@ async function handle(req, res) {
   try {
     if (u.pathname === '/agent/health') return send(res, 200, { ok: true, ready: ready(), saved: saveInfo, github: !!TOKEN, keyRequired: !!KEY, diag: diag() });
     if (!ready()) return send(res, 503, { error: 'el agente está arrancando' });
+    /* avisos push: clave pública (para suscribirse) y alta/baja de la suscripción del móvil */
+    if (req.method === 'GET' && u.pathname === '/agent/push/key') return send(res, 200, { ok: !!VAPID, key: VAPID ? VAPID.pubB64 : null });
+    if (req.method === 'POST' && (u.pathname === '/agent/push/sub' || u.pathname === '/agent/push/test')) {
+      if (KEY && req.headers['x-agent-key'] !== KEY) return send(res, 401, { ok: false, msg: 'clave incorrecta' });
+      if (!VAPID) return send(res, 200, { ok: false, msg: 'El servidor no tiene secreto para los avisos (falta GITHUB_TOKEN o VAPID_SECRET en Render).' });
+      const b = JSON.parse(await readBody(req) || '{}');
+      if (u.pathname === '/agent/push/sub') {
+        const sub = b.sub; if (!sub || !/^https:\/\//.test(sub.endpoint || '') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return send(res, 400, { ok: false, msg: 'suscripción no válida' });
+        const list = pushSubs().filter(x => x.endpoint !== sub.endpoint); if (!b.off) list.push({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, at: Date.now() });
+        pushSave(list); if (b.off) return send(res, 200, { ok: true, msg: 'Avisos desactivados en este móvil.' });
+        if (!b.test) return send(res, 200, { ok: true, msg: 'Suscripción guardada.' });  /* renovación silenciosa: sin aviso de prueba */
+      }
+      const n = await pushSend(b.text || '✅ Avisos activados: te llegarán las compras, ventas y cambios importantes aunque la app esté cerrada.');
+      return send(res, 200, { ok: n > 0, msg: n > 0 ? 'Aviso de prueba enviado.' : 'No se pudo enviar el aviso de prueba.' });
+    }
     if (req.method === 'GET' && u.pathname === '/agent/state') {
       if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
       const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN }; STATE_MS = Date.now() - t0;
@@ -193,6 +209,82 @@ async function handle(req, res) {
     send(res, 404, { error: 'no existe' });
   } catch (e) { log('Error en', u.pathname, e); send(res, 500, { ok: false, msg: 'error del servidor: ' + e.message }); }
 }
+
+
+/* =====================================================================================
+   AVISOS PUSH AL MÓVIL (Web Push estándar, sin servicios de pago ni librerías externas)
+   La app instalada en el móvil se suscribe; el servidor le envía los avisos (compras, ventas,
+   cambios importantes) a través del servicio de avisos del navegador (Google para Chrome),
+   y llegan aunque la app esté cerrada.
+   - Claves VAPID derivadas de un secreto que ya está en Render (VAPID_SECRET o, si no, GITHUB_TOKEN):
+     no se guardan en ningún sitio y son siempre las mismas.
+   - Las suscripciones se guardan CIFRADAS dentro del estado (el repositorio es público).
+   - Cifrado del mensaje: RFC 8291 (aes128gcm) · firma: RFC 8292 (VAPID, ES256).
+   ===================================================================================== */
+const PUSH_SECRET = process.env.VAPID_SECRET || TOKEN || '';
+const b64u = b => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = s => Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+const VAPID = (() => {
+  if (!PUSH_SECRET) return null;
+  try {
+    const N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+    let d = BigInt('0x' + crypto.createHmac('sha256', PUSH_SECRET).update('automaton-vapid-1').digest('hex')) % (N - 1n) + 1n;
+    const dB = Buffer.from(d.toString(16).padStart(64, '0'), 'hex'), ec = crypto.createECDH('prime256v1'); ec.setPrivateKey(dB);
+    const pub = ec.getPublicKey();
+    const key = crypto.createPrivateKey({ key: { kty: 'EC', crv: 'P-256', d: b64u(dB), x: b64u(pub.subarray(1, 33)), y: b64u(pub.subarray(33, 65)) }, format: 'jwk' });
+    return { pub, pubB64: b64u(pub), key, enc: crypto.createHmac('sha256', PUSH_SECRET).update('automaton-push-store').digest() };
+  } catch (e) { log('Avisos push: no se pudieron preparar las claves', e.message); return null; }
+})();
+const hkdf = (salt, ikm, info, len) => { const prk = crypto.createHmac('sha256', salt).update(ikm).digest(); return crypto.createHmac('sha256', prk).update(Buffer.concat([info, Buffer.from([1])])).digest().subarray(0, len); };
+function pushEncrypt(sub, text) {
+  const ua = unb64u(sub.keys.p256dh), auth = unb64u(sub.keys.auth), as = crypto.createECDH('prime256v1'); as.generateKeys();
+  const asPub = as.getPublicKey(), shared = as.computeSecret(ua), salt = crypto.randomBytes(16);
+  const ikm = hkdf(auth, shared, Buffer.concat([Buffer.from('WebPush: info\0'), ua, asPub]), 32);
+  const cek = hkdf(salt, ikm, Buffer.from('Content-Encoding: aes128gcm\0'), 16), nonce = hkdf(salt, ikm, Buffer.from('Content-Encoding: nonce\0'), 12);
+  const c = crypto.createCipheriv('aes-128-gcm', cek, nonce), body = Buffer.concat([c.update(Buffer.concat([Buffer.from(text, 'utf8'), Buffer.from([2])])), c.final(), c.getAuthTag()]);
+  const head = Buffer.alloc(21); salt.copy(head, 0); head.writeUInt32BE(4096, 16); head[20] = asPub.length;
+  return Buffer.concat([head, asPub, body]);
+}
+function vapidAuth(endpoint) {
+  const aud = new URL(endpoint).origin, h = b64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' })),
+    p = b64u(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'https://autokill.onrender.com' }));
+  const sig = crypto.sign('sha256', Buffer.from(h + '.' + p), { key: VAPID.key, dsaEncoding: 'ieee-p1363' });
+  return `vapid t=${h}.${p}.${b64u(sig)}, k=${VAPID.pubB64}`;
+}
+/* suscripciones cifradas dentro del estado del agente */
+function pushSubs() {
+  try { const raw = run('S&&S.pushSubs||""'); if (!raw || !VAPID) return []; const b = Buffer.from(raw, 'base64'), iv = b.subarray(0, 12), tag = b.subarray(12, 28);
+    const d = crypto.createDecipheriv('aes-256-gcm', VAPID.enc, iv); d.setAuthTag(tag); return JSON.parse(Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8')); } catch (e) { return []; }
+}
+function pushSave(list) {
+  const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', VAPID.enc, iv), enc = Buffer.concat([c.update(JSON.stringify(list.slice(-5)), 'utf8'), c.final()]);
+  ctx.__ps = Buffer.concat([iv, c.getAuthTag(), enc]).toString('base64'); run('S.pushSubs=__ps;save(true);'); saveRemote(false);
+}
+async function pushSend(text, title) {
+  if (!VAPID) return 0; const subs = pushSubs(); if (!subs.length) return 0; let ok = 0; const keep = [];
+  const payload = JSON.stringify({ title: title || 'Automaton', body: String(text).slice(0, 1500), t: Date.now() });
+  for (const s of subs) {
+    try {
+      const r = await fetch(s.endpoint, { method: 'POST', headers: { 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'normal', Authorization: vapidAuth(s.endpoint) }, body: pushEncrypt(s, payload) });
+      if (r.status === 404 || r.status === 410) { log('Aviso push: suscripción caducada, se quita'); continue; }
+      if (r.ok) ok++; else log('Aviso push rechazado', r.status, (await r.text().catch(() => '')).slice(0, 120));
+    } catch (e) { log('Aviso push fallido', e.message); }
+    keep.push(s);
+  }
+  if (keep.length !== subs.length) pushSave(keep);
+  return ok;
+}
+/* cada 20 s: lo nuevo del Registro (compras, ventas y cambios importantes) se envía de una vez */
+let pushLastT = 0;
+setInterval(async () => {
+  try {
+    if (!VAPID || !ready()) return; const L0 = run('S.log.slice(0,40).map(e=>({t:e.t,type:e.type,msg:e.msg}))'), ops = run('S.settings.notify?S.settings.notify.ops!==false:true');
+    const top = L0.length ? L0[0].t : 0; if (!pushLastT) { pushLastT = top || Date.now(); return; }
+    const nu = L0.filter(e => e.t > pushLastT && (['open', 'close'].includes(e.type) ? ops : ['evolve', 'dead', 'tier', 'spawn'].includes(e.type))).reverse();
+    if (top > pushLastT) pushLastT = top; if (!nu.length) return;
+    await pushSend(nu.slice(-12).map(e => (e.type === 'open' ? '🟢 ' : e.type === 'close' ? '🔵 ' : '⚠️ ') + e.msg).join('\n'));
+  } catch (e) { log('Avisos push:', e.message); }
+}, 20e3).unref();
 
 process.on('uncaughtException', e => log('Error no capturado:', e));
 process.on('unhandledRejection', e => log('Promesa rechazada:', e));

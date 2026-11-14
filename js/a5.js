@@ -45,7 +45,7 @@ function applyCmd(c,a){
       S.runs=(prev.runs||[]).concat([run]).slice(-50);
       /* comparación con no hacer nada: se archiva la de la etapa que termina; la Mezcla de la nueva usa la proporción media de esta */
       {const B=prev.bench;if(B&&B.sum){run.bench={verdict:B.sum.verdict,adv:B.sum.adv,bot:B.sum.per.etapa.bot&&B.sum.per.etapa.bot.ret,rk:B.sum.per.etapa.rk&&B.sum.per.etapa.rk.ret,days:B.sum.days};const e=B.sum.exp;if(e.s+e.c>0)S.benchPrevS=e.s/(e.s+e.c);}
-       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;S.hist=prev.hist||[];S.journal=prev.journal;S.rsiLab=prev.rsiLab;S.krx=prev.krx;S.cupo=prev.cupo;S.tfOffK=prev.tfOffK;S.krVerdict=prev.krVerdict;
+       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;S.hist=prev.hist||[];S.journal=prev.journal;S.rsiLab=prev.rsiLab;S.pushSubs=prev.pushSubs;S.krx=prev.krx;S.cupo=prev.cupo;S.tfOffK=prev.tfOffK;S.krVerdict=prev.krVerdict;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados, el laboratorio de señales y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
@@ -172,8 +172,27 @@ const REMLAST='automaton.remote.last';let remCacheT=0;
 /* modo servidor: el agente opera en el servidor, así que el móvil avisa él mismo de lo nuevo que ve en el Registro
    (compras, ventas y cambios importantes) cada vez que recibe datos. Funciona mientras la app esté abierta o en segundo plano reciente;
    con la app cerrada del todo solo llegan los avisos de Telegram. */
-const REMLOGT='automaton.remote.logT';
+const REMLOGT='automaton.remote.logT',PUSHK='automaton.push';
+/* avisos push: el móvil se suscribe en el servidor; desde entonces el servidor avisa aunque la app esté cerrada */
+async function pushSubscribe(test){
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)||location.protocol!=='https:')return {ok:false,msg:'Avisos activados mientras la app esté abierta. Para recibirlos con la app cerrada, ábrela instalada desde su dirección web (https), no como archivo descargado.'};
+    const base=cleanUrl(REM.url),hd=Object.assign({'Content-Type':'application/json'},REM.key?{'X-Agent-Key':REM.key}:{});
+    const k=await fget(base+'/agent/push/key',undefined,30000);if(!k||!k.ok||!k.key)return {ok:false,msg:'El servidor aún no tiene avisos push (falta actualizar o el secreto en Render).'};
+    const reg=await navigator.serviceWorker.ready;let sub=await reg.pushManager.getSubscription();
+    let old='';try{old=localStorage.getItem(PUSHK)||'';}catch(e){}
+    if(sub&&old!==k.key){try{await sub.unsubscribe();}catch(e){}sub=null;}
+    if(!sub){const raw=atob(k.key.replace(/-/g,'+').replace(/_/g,'/')),key=new Uint8Array([...raw].map(c=>c.charCodeAt(0)));sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});}
+    const r=await fetch(base+'/agent/push/sub',{method:'POST',headers:hd,body:JSON.stringify({sub:sub.toJSON(),test:!!test})}).then(x=>x.json());
+    if(!r||r.ok===false&&!/prueba/.test(r.msg||''))return {ok:false,msg:'El servidor no aceptó la suscripción: '+((r&&r.msg)||'sin respuesta')};
+    try{localStorage.setItem(PUSHK,k.key);}catch(e){}
+    return {ok:true,msg:!test||r.ok?'Avisos activados: te llegarán las compras, ventas y cambios importantes aunque la app esté cerrada.'+(test?' Te he mandado uno de prueba.':''):'Avisos activados, pero el aviso de prueba no llegó a salir del servidor. Si no te llegan avisos, dímelo.'};
+  }catch(e){return {ok:false,msg:'No se pudieron activar los avisos con la app cerrada ('+why(e)+'). Seguirán llegando mientras esté abierta.'};}
+}
+/* al abrir la app: si ya tenía avisos push, se renueva la suscripción en silencio (por si el servidor cambió de clave) */
+setTimeout(()=>{try{if(REM.on&&REM.url&&localStorage.getItem(PUSHK)&&'Notification' in window&&Notification.permission==='granted')pushSubscribe(false);}catch(e){}},8000);
 function remNotify(log){
+  try{if(localStorage.getItem(PUSHK))return;}catch(e){} /* con avisos push ya avisa el servidor: no se duplican */
   let last=0;try{last=+localStorage.getItem(REMLOGT)||0;}catch(e){}
   const top=log.length?log[0].t:0;if(!last){try{localStorage.setItem(REMLOGT,String(top||Date.now()));}catch(e){}return;}
   const n=nset(),want=e=>e.t>last&&(['open','close'].includes(e.type)?n.ops!==false:['evolve','dead','tier','spawn'].includes(e.type));
@@ -300,6 +319,7 @@ $('tgTest').addEventListener('click',async()=>{
 $('sysBtn').addEventListener('click',async()=>{
   if(!('Notification' in window)){tgMsg('Este navegador no tiene avisos. Usa Telegram.',false);return;}
   try{const p=await Notification.requestPermission();const n=nset();n.sys=p==='granted';try{localStorage.setItem(SYSK,n.sys?'1':'0');}catch(e){}save(true);$('sysBtn').textContent=n.sys?'Activados':'Activar';
+    if(n.sys&&REM.on&&REM.url){const r=await pushSubscribe(true);tgMsg(r.msg,r.ok);if(r.ok)return;}
     if(n.sys){sysPost('Avisos activados.');tgMsg('Avisos del navegador activados.',true);}else tgMsg('Permiso denegado. Puedes activarlo en los ajustes del sitio en Chrome.',false);}
   catch(e){tgMsg('No se pudieron activar aquí. Usa Telegram.',false);}
 });

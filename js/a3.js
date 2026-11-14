@@ -1088,3 +1088,83 @@ function journalText(n){const R=journalRows(n);if(!R.length)return 'aún sin cam
     (run.length?`<p class="note" style="margin:0 0 8px"><b>Pruebas en marcha</b> (mejor no cambiar ajustes hasta que terminen): ${esc(run.join(' · '))}.</p>`:'')+
     (R.length?`<div class="tw"><table><tr><th>Cuándo</th><th>Quién</th><th>Cambio</th><th>7 días antes</th><th>Después</th></tr>${R.map(e=>`<tr><td>${new Date(e.t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td>${e.who==='tú'?'Tú':'Bot'}</td><td style="white-space:normal;min-width:220px">${esc(e.what)}${e.warn?`<br><span class="note">con pruebas en marcha: ${esc(e.warn.join('; '))}</span>`:''}</td><td style="white-space:normal">${esc(pf(e.before))}</td><td style="white-space:normal">${esc(pf(e.after))}</td></tr>`).join('')}</table></div>`:'<p class="note">Aún sin cambios apuntados.</p>');
 }catch(e){}};}
+
+/* =====================================================================================
+   LABORATORIO «REBOTE POR RSI» (solo mide: el bot NO compra con esto)
+   Idea del dueño: cuando el RSI baja de 30 la acción suele rebotar, y cuando pasa de 70 suele caer.
+   Cada vez que una vela CERRADA cruza esas líneas se apunta una operación ficticia y se sigue con
+   las mismas reglas de venta del bot (stop, objetivo, mitad a +1R, trailing, cruce de medias,
+   tiempo máximo) y los costes reales (comisión, deslizamiento y diferencia compra/venta).
+     · «rebote (RSI < 30)»: compra al cruzar por debajo de 30.
+     · «caída (RSI > 70)»: venta en corto al cruzar por encima de 70 (mide si de verdad cae;
+        en Binance contado no se puede ir en corto, así que en real solo valdría con futuros o IBKR).
+   Se separa según la tendencia de fondo de ese activo (precio por encima o por debajo de su media
+   de 100 velas): el rebote suele funcionar mejor dentro de una subida y la caída dentro de una bajada.
+   Conclusión solo con ≥ 40 casos de ≥ 3 días distintos (ningún día > 50 %) y t ≥ 2,5.
+   ===================================================================================== */
+const RL_LO=30,RL_HI=70,RL_N=40,RL_T=2.5;
+const rlOf=()=>S.rsiLab||(S.rsiLab={open:[],list:[],sum:null,at:0,sumAt:0,seen:{}});
+function rlScan(){
+  const R=rlOf(),P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,now=Date.now();
+  for(const tf of tfs())for(const k of uni()){
+    const k0=kOf(tf,k);if(!k0||k0.length<120)continue;
+    let n=k0.length-1;if(k0[n].t+TF_MS[tf]>now)n--; /* solo velas cerradas */
+    if(n<110)continue;const key=k+'|'+tf;if(R.seen[key]===k0[n].t)continue;R.seen[key]=k0[n].t;
+    const c=k0.slice(0,n+1).map(x=>x.c),r1=rsi(c),r0=rsi(c.slice(0,-1));
+    const up=r0>=RL_LO&&r1<RL_LO,dn=r0<=RL_HI&&r1>RL_HI;if(!up&&!dn)continue;
+    const kk=k0.slice(0,n+1),a=atr(kk),e=c[n];if(!(a>0&&e>0))continue;
+    const e100=ema(c,100)[n],fondo=e>e100?'alcista':'bajista',side=up?'long':'short',sd=P.stopATR*a,cost=costOf(k);
+    const id=key+'|'+side+'|'+k0[n].t;if(R.open.some(x=>x.id===id))continue;
+    R.open.push({id,k,tf,sh:dn?1:0,t:k0[n].t+TF_MS[tf],e,sd,a,cf:cost,var:up?'rebote (RSI < 30)':'caída (RSI > 70)',fondo,cat:catOf(k),
+      prof:up?(r1<20?'< 20':r1<25?'20-25':'25-30'):(r1>80?'> 80':r1>75?'75-80':'70-75'),sp:sprOf(k)});
+  }
+  if(R.open.length>600)R.open.splice(0,R.open.length-600);
+}
+function rlResolve(){
+  const R=rlOf(),keep=[],P=(S.agents.find(a=>a.id===0)||S.agents[0]).params,SC={};
+  for(const s of R.open){
+    const c=kOf(s.tf,s.k);if(!c||c.length<60){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    const ck=s.tf+'|'+s.k,sr=SC[ck]||(SC[ck]=serie(c)),ef=sr.E[P.emaF]||(sr.E[P.emaF]=ema(sr.c,P.emaF)),es=sr.E[P.emaS]||(sr.E[P.emaS]=ema(sr.c,P.emaS));
+    const i0=sr.k.findIndex(x=>x.t>=s.t);if(i0<0){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    const sh=!!s.sh,e=s.e,atr0=s.a,cost=s.cf;
+    const p={sh,e,r:s.sd,atr:atr0,stop:sh?e+s.sd:e-s.sd,tp:sh?e-P.tpATR*atr0:e+P.tpATR*atr0,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
+    let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,pct:fr,res:x.why};break;}}
+    if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
+    R.list.unshift({t:s.t,k:s.k,tf:s.tf,var:s.var,fondo:s.fondo,cat:s.cat,prof:s.prof,r:+out.r.toFixed(3),pct:+out.pct.toFixed(5),res:out.res});
+  }
+  R.open=keep;if(R.list.length>1200)R.list.length=1200;
+}
+function rlAnalyze(){
+  const R=rlOf(),L0=R.list.filter(x=>Date.now()-x.t<30*864e5),groups={};
+  const add=(name,x)=>{(groups[name]=groups[name]||[]).push(x);};
+  for(const x of L0){add(x.var,x);add(`${x.var} · fondo ${x.fondo}`,x);add(`${x.var} · ${x.cat}`,x);add(`${x.var} · velas de ${x.tf}`,x);add(`${x.var} · RSI ${x.prof}`,x);}
+  const rows=Object.entries(groups).map(([g,v])=>{const st=mstat(v.map(x=>x.r)),sp=sigSpread(v);return {g,...st,pct:v.reduce((t,x)=>t+x.pct,0)/v.length,spread:sp,clear:st.n>=RL_N&&Math.abs(st.t)>=RL_T&&sp.ok};}).sort((x,y)=>y.n-x.n);
+  R.sum={at:Date.now(),n:L0.length,open:R.open.length,rows};
+  const win=rows.filter(r=>r.clear&&r.m>0).sort((x,y)=>y.t-x.t)[0],key=win?win.g:'';
+  if(key&&R.win!==key){R.win=key;L(null,'evolve',`Laboratorio «rebote por RSI»: «${win.g}» gana de forma clara tras costes (${win.n} casos, ${Math.round(win.w*100)} % ganadoras, ${win.m.toFixed(2)}R de media, t = ${win.t.toFixed(1)}). El bot aún no opera con esto: se puede estudiar activarlo.`);}
+  else if(!key&&R.win){R.win='';}
+  return R.sum;
+}
+function rlTick(){const R=rlOf(),now=Date.now();if(now-R.at<5*60e3)return;R.at=now;try{rlScan();rlResolve();if(now-R.sumAt>=3600e3||!R.sum){R.sumAt=now;rlAnalyze();}}catch(e){}}
+{const s7=sigTick;sigTick=function(){s7.apply(this,arguments);rlTick();};}
+function rlText(){
+  const R=S.rsiLab,sm=R&&R.sum;if(!sm||!sm.n)return `reuniendo datos (${R?R.open.length:0} cruces del RSI en seguimiento). Apunta cada vez que una vela cerrada cruza por debajo de 30 o por encima de 70.`;
+  const f=r=>`${r.g}: ${r.n} casos, ${Math.round(r.w*100)} % ganan, ${r.m>=0?'+':''}${r.m.toFixed(2)}R (${pct(r.pct)} por operación tras costes, t ${r.t.toFixed(1)})${r.clear?' ← CLARO':''}`;
+  const main=sm.rows.filter(r=>!r.g.includes(' · ')),fondo=sm.rows.filter(r=>r.g.includes('fondo'));
+  return `${sm.n} cruces resueltos en 30 días, ${sm.open} en seguimiento.\n    ${main.map(f).join('\n    ')}\n    ${fondo.map(f).join('\n    ')}`;
+}
+{const p12=protReport;protReport=function(){return p12.apply(this,arguments)+`\nLABORATORIO «REBOTE POR RSI» (solo mide; el bot no opera con esto):\n    ${rlText()}\n`;};}
+/* tarjeta en Estadísticas, justo debajo del laboratorio de señales */
+{const sc=sigCard;sigCard=function(){sc.apply(this,arguments);try{const box=document.getElementById('sigCard');if(!box||!box.parentNode)return;
+  let el=document.getElementById('rsiLabCard');if(!el){el=document.createElement('div');el.className='card';el.id='rsiLabCard';}
+  if(box.nextSibling!==el)box.parentNode.insertBefore(el,box.nextSibling);
+  const R=S.rsiLab,sm=R&&R.sum,th='<tr><th>Grupo</th><th>Casos</th><th>Ganan</th><th>R medio</th><th>Por operación</th></tr>';
+  const row=r=>`<tr><td style="white-space:normal">${esc(r.g)}${r.clear?' <b>✓ claro</b>':''}</td><td>${r.n}</td><td>${Math.round(r.w*100)} %</td><td class="${r.m>=0?'up':'down'}">${r.m>=0?'+':''}${r.m.toFixed(2)}R</td><td>${pct(r.pct)}</td></tr>`;
+  el.innerHTML=`<h2>Laboratorio · rebote por RSI</h2><p class="note" style="margin:0 0 8px">Solo mide, el bot no opera con esto. Cada vez que una vela cerrada cruza el RSI por debajo de 30 («rebote») o por encima de 70 («caída») apunta una operación ficticia y la sigue con las reglas de venta del bot y los costes reales. Da conclusión con 40 casos de 3 días distintos y t ≥ 2,5.</p>`+
+    (sm&&sm.n?`<div class="tw"><table>${th}${sm.rows.filter(r=>!r.g.includes(' · ')||r.g.includes('fondo')).map(row).join('')}</table></div><p class="note" style="margin:8px 0 0">${sm.n} cruces resueltos en 30 días · ${sm.open} en seguimiento.</p>`
+      :`<p class="note">Reuniendo datos: ${R?R.open.length:0} cruces en seguimiento.</p>`);}catch(e){}};}
+/* lo pesado no viaja a los móviles: solo el resumen */
+/* (exportView se define en a5.js, después de este archivo: se envuelve al arrancar, igual que hace el laboratorio de señales) */
+{const sl=sigLate;sigLate=function(){sl.apply(this,arguments);
+  if(typeof exportView==='function'&&!exportView.__rl){const e0=exportView;exportView=function(){const R=S.rsiLab;if(R)S.rsiLab={sum:R.sum,open:{length:R.open.length}};try{return e0.apply(this,arguments);}finally{if(R)S.rsiLab=R;}};
+    exportView.__rl=1;exportView.__sig=e0.__sig;exportView.__bm=e0.__bm;}};}

@@ -566,7 +566,7 @@ function closePos0(a,p,reason,at,user){
   if(a.closed.length>500)a.closed.length=500;
   if(pnl<0&&!user)a.cooldown[p.sym]=Date.now()+30*60e3;
   if(user)labAdd(a,p,user,price,pnl);
-  L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/b0)}) · motivo: ${reason}${p.mfe!=null?` · llegó a ir ${p.mfe.toFixed(1)}R a favor`:''}`);
+  L(a,'close',`${sh?'Cierra corto en':'Venta'} ${base(p.sym)} @ ${px(price)} · ${sgn(pnl)} (${pct(pnl/b0)}) · motivo: ${reason}${p.risk>0&&(p.qty0||p.qty)>0?` · resultado total ${(pnl/(p.risk*(p.qty0||p.qty))).toFixed(2)}R`:''}${p.mfe!=null?` · llegó a ir ${p.mfe.toFixed(1)}R a favor`:''}`);
 }
 function checkExits(a){
   if(a.status!=='alive')return;

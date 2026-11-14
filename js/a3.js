@@ -547,7 +547,7 @@ function sigResolve(){
     const p={sh,e,r:s.sd,atr,stop:sh?e+s.sd:e-s.sd,tp:sh?e-P.tpATR*atr:e+P.tpATR*atr,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
     let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,res:x.why};break;}}
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
-    G.list.unshift({v:2,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2)});
+    G.list.unshift({v:2,id:s.id,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2)});
   }
   G.open=keep;sigTrim(G);
 }
@@ -1023,8 +1023,8 @@ RLAB.unshift(['diferencia compra/venta','diferencia compra/venta demasiado grand
 SIG_FK.push('diferencia compra/venta');
 {const sf2=sigFeat;sigFeat=function(a,an,P){const f=sf2(a,an,P),s=sprOf(an.sym);f['diferencia compra/venta']=band(s==null?null:s*100,[.02,.05,.1,.3],['<0,02 %','0,02-0,05 %','0,05-0,1 %','0,1-0,3 %','0,3 %+']);return f;};}
 /* la diferencia en el momento de entrar queda en la posición y, al cerrar, en el historial */
-{const o6=openPos;openPos=function(a,an,P){const n=a.positions.length,r=o6.apply(this,arguments);if(!r&&a.positions.length>n){const p=a.positions[a.positions.length-1],s=sprOf(an.sym);if(p&&p.sym===an.sym){if(s!=null)p.spr=+s.toFixed(6);p.sc=an.score;try{p.kp=krOpin(an.sym,an.tf,an.side==='short');}catch(e){}}}return r;};}
-{const c6=closePos;closePos=function(a,p,reason,at,user){const s=p&&p.spr,r=c6.apply(this,arguments);if(s!=null&&S.hist&&S.hist[0]&&S.hist[0].sym===p.sym&&S.hist[0].spr==null)S.hist[0].spr=s;return r;};}
+{const o6=openPos;openPos=function(a,an,P){const n=a.positions.length,r=o6.apply(this,arguments);if(!r&&a.positions.length>n){const p=a.positions[a.positions.length-1],s=sprOf(an.sym);if(p&&p.sym===an.sym){if(s!=null)p.spr=+s.toFixed(6);p.sc=an.score;try{const c=kOf(an.tf,an.sym);if(c&&c.length)p.sid=an.sym+'|'+an.tf+'|'+an.side+'|'+c[c.length-1].t;}catch(e){}try{p.kp=krOpin(an.sym,an.tf,an.side==='short');}catch(e){}}}return r;};}
+{const c6=closePos;closePos=function(a,p,reason,at,user){const s=p&&p.spr,r=c6.apply(this,arguments);const h=S.hist&&S.hist[0];if(h&&h.sym===p.sym){if(s!=null&&h.spr==null)h.spr=s;if(p.sid&&!h.sid)h.sid=p.sid;}return r;};}
 function sprText(){
   const v=Object.entries(market.spr||{}).filter(([k,x])=>Date.now()-x.t<5*60e3&&uni().includes(k)).map(([k,x])=>[k,x.s]).sort((p,q)=>p[1]-q[1]);
   if(!v.length)return 'sin datos del libro de órdenes todavía (se piden a Binance una vez por minuto).';
@@ -1177,3 +1177,27 @@ function rlText(){
 {const sl=sigLate;sigLate=function(){sl.apply(this,arguments);
   if(typeof exportView==='function'&&!exportView.__rl){const e0=exportView;exportView=function(){const R=S.rsiLab;if(R)S.rsiLab={sum:R.sum,open:{length:R.open.length}};try{return e0.apply(this,arguments);}finally{if(R)S.rsiLab=R;}};
     exportView.__rl=1;exportView.__sig=e0.__sig;exportView.__bm=e0.__bm;}};}
+
+/* =====================================================================================
+   ENLACES ENTRE DATOS
+   1) Operación real ↔ su señal del laboratorio: cada operación guarda el id de la señal de la que salió.
+      Comparando lo que ganó de verdad con lo que el laboratorio calculó para esa misma señal se sabe
+      si el laboratorio dice la verdad (si se desvía mucho, sus conclusiones valen menos).
+   2) Opinión de Kronos al entrar ↔ resultado real: aunque Kronos no confirme las compras
+      («Solo anticipar salidas»), cada operación guarda lo que opinaba, y se compara en dinero real.
+   ===================================================================================== */
+function labFidelity(){
+  const G=S.sig;if(!G||!G.list)return null;const byId={};for(const x of G.list)if(x.id)byId[x.id]=x;
+  const pairs=histOf().filter(h=>h.sid&&h.Rt!=null&&byId[h.sid]).map(h=>({real:h.Rt,lab:byId[h.sid].r}));
+  if(!pairs.length)return {n:0};const n=pairs.length,mr=pairs.reduce((t,x)=>t+x.real,0)/n,ml=pairs.reduce((t,x)=>t+x.lab,0)/n,same=pairs.filter(x=>Math.sign(x.real)===Math.sign(x.lab)).length/n;
+  return {n,mr,ml,same};}
+function linkText(){
+  const f=labFidelity(),H=histOf().filter(x=>!x.user&&x.kp&&x.t1>Date.now()-30*864e5),g={};
+  for(const x of H)(g[x.kp]=g[x.kp]||[]).push(x);
+  const kp=Object.entries(g).map(([k,v])=>`${k}: ${v.length} op., ${Math.round(v.filter(x=>x.pnl>0).length/v.length*100)} % ganadoras, media ${pct(v.reduce((t,x)=>t+x.pct,0)/v.length)}`).join(' · ');
+  const fid=!f||!f.n?'aún sin operaciones enlazadas con su señal (empiezan a enlazarse desde hoy).'
+    :`${f.n} operaciones enlazadas: de media ganaron ${f.mr.toFixed(2)}R de verdad y el laboratorio calculó ${f.ml.toFixed(2)}R para esas mismas señales; coinciden en ganar o perder el ${Math.round(f.same*100)} %.${f.n>=20&&Math.abs(f.mr-f.ml)>.3?' La diferencia es grande: las conclusiones del laboratorio hay que tomarlas con cautela.':''}`;
+  return {fid,kp:kp||'aún sin operaciones con la opinión de Kronos guardada.'};}
+{const p13=protReport;protReport=function(){const l=linkText();return p13.apply(this,arguments)+`\nENLACES · ¿EL LABORATORIO DICE LA VERDAD?\n  ${l.fid}\nENLACES · OPINIÓN DE KRONOS AL ENTRAR → RESULTADO REAL (30 días)\n  ${l.kp}\n`;};}
+{const b13=benchCard;benchCard=function(){b13.apply(this,arguments);try{const box=document.getElementById('krCmpBox');if(!box)return;const l=linkText();let el=document.getElementById('linkBox');if(!el){el=document.createElement('div');el.id='linkBox';}box.appendChild(el);
+  el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>¿El laboratorio dice la verdad?</b> ${esc(l.fid)}</p><p class="note" style="margin:8px 0 0"><b>Opinión de Kronos al entrar → resultado real</b>: ${esc(l.kp)}</p>`;}catch(e){}};}

@@ -921,10 +921,15 @@ function histAdd(a,x){
    ===================================================================================== */
 const dayKey=t=>new Date(t).toISOString().slice(0,10);
 function cupoOf(){const d=dayKey(Date.now());if(!S.cupo||S.cupo.day!==d)S.cupo={day:d,n:0,g:{}};return S.cupo;}
-function grpExp(g,days){const t0=Date.now()-days*864e5,xs=histOf().filter(x=>!x.user&&x.t1>t0&&patKey(x)===g).slice(0,40);
-  return xs.length?{n:xs.length,m:xs.reduce((t,x)=>t+x.pct,0)/xs.length}:{n:0,m:0};}
+/* resultados por tipo de operación de los últimos 14 días; se recalculan como mucho cada 30 s (se consultan en cada señal) */
+let grpC={at:0,len:-1,m:{}};
+function grpExp(g,days){
+  const H=histOf(),now=Date.now();
+  if(now-grpC.at>30e3||grpC.len!==H.length||grpC.days!==days){grpC={at:now,len:H.length,days,m:{}};const t0=now-days*864e5;
+    for(const x of H){if(x.user||x.t1<=t0)continue;const k=patKey(x),o=grpC.m[k]||(grpC.m[k]={n:0,s:0});if(o.n<40){o.n++;o.s+=x.pct;}}}
+  const o=grpC.m[g];return o&&o.n?{n:o.n,m:o.s/o.n}:{n:0,m:0};}
 function cupoLim(g){const e=grpExp(g,14);return {lim:e.n<10?4:e.m<0?2:e.m>.002?8:4,e};}
-function cupoTot(){const xs=histOf().filter(x=>!x.user).slice(0,40);if(xs.length<20)return {lim:24,m:null,n:xs.length};const m=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return {lim:m<0?12:24,m,n:xs.length};}
+function cupoTot(){const xs=[];for(const x of histOf()){if(!x.user)xs.push(x);if(xs.length>=40)break;}if(xs.length<20)return {lim:24,m:null,n:xs.length};const m=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return {lim:m<0?12:24,m,n:xs.length};}
 function tfOff(){
   const G=S.tfcmp,a=G&&G.avg,out={};if(!a||!G.hist||G.hist.length<5)return out;
   const act=tfs(),use=tf=>a[tf]&&a[tf].n>=60&&act.includes(tf),can=tf=>tf!=='4h'||tf4Decide();
@@ -995,4 +1000,91 @@ function krCmpText(){
 {const p9=protReport;protReport=function(){return p9.apply(this,arguments)+`\nKRONOS · CON FRENTE A SIN:\n  ${krCmpText()}\nCOSTES · CUPOS Y MARCOS:\n  ${costText()}\n`;};}
 {const b9=benchCard;benchCard=function(){b9.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.appendChild)return;
   let el=document.getElementById('krCmpBox');if(!el){el=document.createElement('div');el.id='krCmpBox';}box.appendChild(el);
-  el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>Kronos · con frente a sin</b>: ${esc(krCmpText())}</p><p class="note" style="margin:8px 0 0"><b>Costes · cupos de hoy</b>: ${esc(costText())}</p>`;}catch(e){}};}
+  el.innerHTML=`<p class="note" style="margin:8px 0 0"><b>Kronos · con frente a sin</b>: ${esc(krCmpText())}</p><p class="note" style="margin:8px 0 0"><b>Costes · cupos de hoy</b>: ${esc(costText())}</p><p class="note" style="margin:8px 0 0"><b>Diferencia compra/venta</b>: ${esc(typeof sprText==='function'?sprText():'')}</p>`;}catch(e){}};}
+
+/* =====================================================================================
+   DIFERENCIA COMPRA/VENTA REAL (libro de órdenes de Binance)
+   - Ya entra en el coste de cada orden (slipOf): se compra al precio de venta y se vende al de compra.
+   - Filtro: no compra si la diferencia es mayor del 0,5 %, o si se come más de una cuarta parte
+     del recorrido hasta el objetivo (sobre todo acciones tokenizadas con la bolsa de EE. UU. cerrada).
+   - Se guarda la diferencia en la entrada de cada posición y en el historial, y el laboratorio la
+     mide como rasgo («diferencia compra/venta») para aprender a partir de qué nivel no compensa.
+   ===================================================================================== */
+const SPR_MAX=.005,SPR_TP=.25;
+const sprTxt=s=>(s*100).toLocaleString('es-ES',{maximumFractionDigits:s<.001?3:2})+' %';
+function sprGate(a,an){
+  if(onIB(an.sym)&&!isBS(an.sym))return null;const s=sprOf(an.sym);if(s==null)return null;
+  if(s>SPR_MAX)return `diferencia compra/venta demasiado grande: ${sprTxt(s)} (máximo ${sprTxt(SPR_MAX)})`;
+  const P=a.params||DEF_PARAMS,tp=an.price>0&&an.atr>0?P.tpATR*an.atr/an.price:0;
+  if(tp>0&&s>SPR_TP*tp)return `diferencia compra/venta demasiado grande frente al objetivo: ${sprTxt(s)} se come más de la cuarta parte del recorrido previsto (${sprTxt(tp)})`;
+  return null;}
+{const d6=decide;decide=function(a,an,P,T,pre){return d6(a,an,P,T,pre)||sprGate(a,an);};}
+RLAB.unshift(['diferencia compra/venta','diferencia compra/venta demasiado grande']);
+SIG_FK.push('diferencia compra/venta');
+{const sf2=sigFeat;sigFeat=function(a,an,P){const f=sf2(a,an,P),s=sprOf(an.sym);f['diferencia compra/venta']=band(s==null?null:s*100,[.02,.05,.1,.3],['<0,02 %','0,02-0,05 %','0,05-0,1 %','0,1-0,3 %','0,3 %+']);return f;};}
+/* la diferencia en el momento de entrar queda en la posición y, al cerrar, en el historial */
+{const o6=openPos;openPos=function(a,an,P){const n=a.positions.length,r=o6.apply(this,arguments);if(!r&&a.positions.length>n){const p=a.positions[a.positions.length-1],s=sprOf(an.sym);if(p&&p.sym===an.sym&&s!=null)p.spr=+s.toFixed(6);}return r;};}
+{const c6=closePos;closePos=function(a,p,reason,at,user){const s=p&&p.spr,r=c6.apply(this,arguments);if(s!=null&&S.hist&&S.hist[0]&&S.hist[0].sym===p.sym&&S.hist[0].spr==null)S.hist[0].spr=s;return r;};}
+function sprText(){
+  const v=Object.entries(market.spr||{}).filter(([k,x])=>Date.now()-x.t<5*60e3&&uni().includes(k)).map(([k,x])=>[k,x.s]).sort((p,q)=>p[1]-q[1]);
+  if(!v.length)return 'sin datos del libro de órdenes todavía (se piden a Binance una vez por minuto).';
+  const med=v[Math.floor(v.length/2)][1],hi=v.slice(-3).reverse().map(([k,s])=>`${base(k)} ${sprTxt(s)}`).join(', '),over=v.filter(x=>x[1]>SPR_MAX).length;
+  const H=histOf().filter(x=>x.spr!=null).slice(0,100),mh=H.length?H.reduce((t,x)=>t+x.spr,0)/H.length:null;
+  return `ahora, en ${v.length} activos de Binance: mediana ${sprTxt(med)}; las más altas ${hi}${over?` (${over} por encima del ${sprTxt(SPR_MAX)}: no se compran)`:''}.`+(mh!=null?` En las últimas ${H.length} operaciones se pagó de media ${sprTxt(mh)} de diferencia al entrar.`:'');}
+{const p10=protReport;protReport=function(){return p10.apply(this,arguments)+`\nDIFERENCIA COMPRA/VENTA (libro de órdenes real):\n  ${sprText()}\n`;};}
+
+/* =====================================================================================
+   DIARIO DE CAMBIOS
+   Apunta cada cambio que altera cómo opera el bot —los tuyos (ajustes, reinicio de saldo,
+   modo, límites, reparto, hijos…) y los que hace él solo (automejora, laboratorio, marcos de
+   velas, Kronos…)— con el resultado de los 7 días anteriores y, después, el resultado
+   desde ese cambio hasta el siguiente. Así se sabe qué mejoró de verdad.
+   Al cambiar ajustes con pruebas en marcha, avisa de cuáles se ven afectadas (no lo impide).
+   No se borra al reiniciar el saldo.
+   ===================================================================================== */
+const JRN_MAX=200;
+function perfOf(t0,t1){const xs=histOf().filter(x=>!x.user&&x.t1>=t0&&x.t1<t1);return {n:xs.length,w:xs.filter(x=>x.pnl>0).length,m:xs.length?xs.reduce((t,x)=>t+x.pct,0)/xs.length:0,pl:+xs.reduce((t,x)=>t+x.pnl,0).toFixed(4),fe:+xs.reduce((t,x)=>t+(x.fees||0),0).toFixed(4)};}
+function jAdd(who,kind,what,warn){
+  const J=S.journal||(S.journal=[]),now=Date.now();
+  J.unshift({t:now,who,kind,what:String(what).slice(0,400),warn:warn&&warn.length?warn:undefined,before:perfOf(now-7*864e5,now)});
+  if(J.length>JRN_MAX)J.length=JRN_MAX;}
+/* pruebas en marcha que un cambio de reglas enturbia */
+function testsRunning(){
+  const out=[],a=S.agents[0],ev=a&&a.evo;
+  if(ev&&ev.prev&&ev.judged!==ev.ver)out.push(`automejora v${ev.ver} comprobándose en real (${liveExp(a,ev.at).n} de 15 operaciones)`);
+  const B=S.bench,sm=B&&B.sum;if(B&&B.t0&&(!sm||sm.verdict==='pronto'))out.push(`comparación con «no hacer nada» (${sm?sm.days||0:0} de 20 días)`);
+  const G=S.tfcmp;if(!G||!G.hist||G.hist.length<10)out.push(`prueba de marcos de velas (${G&&G.hist?G.hist.length:0} de 10 días)`);
+  try{if(krOn()&&/^aún pocos/.test(krCmp().verdict))out.push('comparación de Kronos con frente a sin (recogiendo datos)');}catch(e){}
+  for(const k in S.pause||{}){const st=S.pause[k];if(st&&st.prob)out.push(`${patLab(k)} en prueba tras una pausa`);}
+  const X=S.krx;if(X&&X.open&&X.open.length)out.push(`ventas anticipadas de Kronos pendientes de saber qué habría pasado (${X.open.length})`);
+  return out;}
+/* nombres legibles de los ajustes */
+const JLAB={tf:'velas',universe:'activos vigilados',broker:'bróker',shorts:'cortos',maxDay:'pérdida máxima diaria',fee:'comisión',slip:'deslizamiento',repl:'réplicas',maxKids:'máximo de hijos',
+  'kronos.mode':'Kronos (uso)','kronos.url':'Kronos (dirección)',use4h:'velas de 4 h',split:'reparto IBKR',selfOpt:'automejora',bnbFee:'pagar comisiones con BNB',keepProfit:'apartar beneficio',
+  mode:'modo',limit:'límite de ganancia',maxLoss:'límite de pérdida por operación',maxOpenV:'posiciones a la vez',markets:'mercados'};
+const JSKIP=/^(notify|tg|tf4On|pauseV2|bnbV1|tf4V1|migr|v\d)/;
+function flat(o,p,out){out=out||{};for(const k in o||{}){const v=o[k],q=p?p+'.'+k:k;if(v&&typeof v==='object'&&!Array.isArray(v))flat(v,q,out);else out[q]=Array.isArray(v)?JSON.stringify(v):v;}return out;}
+const jv=v=>v===true?'sí':v===false?'no':v==null||v===''?'—':typeof v==='number'?String(+v.toFixed(4)):String(v);
+function jDiff(A,B){const a=flat(A),b=flat(B),ks=[...new Set([...Object.keys(a),...Object.keys(b)])].filter(k=>!JSKIP.test(k)&&a[k]!==b[k]);
+  return ks.map(k=>`${JLAB[k]||k}: ${jv(a[k])} → ${jv(b[k])}`);}
+/* cambios tuyos: se envuelve el despachador de órdenes */
+const JCMD={settings:'ajustes',capital:'reinicio de saldo',mode:'modo',maxloss:'límite de pérdida',bnb:'comisiones con BNB',keep:'apartar beneficio',split:'reparto IBKR/Binance',
+  retire:'retirar hijo',spawn:'crear hijo',run:'pausa/reanudar',benchundo:'deshacer freno de la comparación',improve:'automejora a mano',possell:'venta manual',unvault:'liberar reservado'};
+/* (la envoltura de applyCmd está al final de a5.js: applyCmd se define allí, después de este archivo) */
+/* cambios que hace el bot solo: todo lo que se anuncia como «evolve» en el Registro */
+{const L0=L;L=function(a,type,msg){L0.apply(this,arguments);if(type==='evolve')try{jAdd('bot','auto',(a&&a.name?a.name+': ':'')+msg);}catch(e){}};}
+function journalRows(n){
+  const J=S.journal||[],now=Date.now();
+  return J.slice(0,n||15).map((e,i)=>{const end=i>0?J[i-1].t:now;return Object.assign({},e,{after:perfOf(e.t,end),until:i>0?end:null});});}
+const pf=x=>x.n?`${x.n} op. · ${Math.round(x.w/x.n*100)} % ganadoras · media ${pct(x.m)} · ${sgn(x.pl)}`:'sin operaciones';
+function journalText(n){const R=journalRows(n);if(!R.length)return 'aún sin cambios apuntados.';
+  return R.map(e=>`  ${new Date(e.t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${e.who==='tú'?'TÚ':'BOT'} · ${e.what}\n     7 días antes: ${pf(e.before)} | después${e.until?' (hasta el siguiente cambio)':''}: ${pf(e.after)}`).join('\n');}
+{const p11=protReport;protReport=function(){return p11.apply(this,arguments)+`\nDIARIO DE CAMBIOS (últimos 10, con el resultado antes y después):\n${journalText(10)}\n`;};}
+{const b11=benchCard;benchCard=function(){b11.apply(this,arguments);try{const box=document.getElementById('benchCard');if(!box||!box.parentNode)return;
+  let el=document.getElementById('journalCard');if(!el){el=document.createElement('div');el.className='card';el.id='journalCard';}
+  if(box.nextSibling!==el)box.parentNode.insertBefore(el,box.nextSibling);
+  const R=journalRows(15),run=testsRunning();
+  el.innerHTML=`<h2>Diario de cambios</h2><p class="note" style="margin:0 0 8px">Cada cambio en cómo opera el bot —tuyo o suyo— con el resultado de los 7 días anteriores y lo que ha pasado desde entonces. Sirve para saber qué mejoró de verdad.</p>`+
+    (run.length?`<p class="note" style="margin:0 0 8px"><b>Pruebas en marcha</b> (mejor no cambiar ajustes hasta que terminen): ${esc(run.join(' · '))}.</p>`:'')+
+    (R.length?`<div class="tw"><table><tr><th>Cuándo</th><th>Quién</th><th>Cambio</th><th>7 días antes</th><th>Después</th></tr>${R.map(e=>`<tr><td>${new Date(e.t).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td>${e.who==='tú'?'Tú':'Bot'}</td><td style="white-space:normal;min-width:220px">${esc(e.what)}${e.warn?`<br><span class="note">con pruebas en marcha: ${esc(e.warn.join('; '))}</span>`:''}</td><td style="white-space:normal">${esc(pf(e.before))}</td><td style="white-space:normal">${esc(pf(e.after))}</td></tr>`).join('')}</table></div>`:'<p class="note">Aún sin cambios apuntados.</p>');
+}catch(e){}};}

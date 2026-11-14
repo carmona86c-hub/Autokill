@@ -91,7 +91,11 @@ const krOf=(k,tf)=>{const c=krEntry(k,tf);return c?c.r:null;};
    Medido contra la bolsa de EE. UU. (velas de 1 minuto, 19-23 oct): con ese precio la simulación salía de media 0,06 puntos
    más optimista por operación completa; así no lo es. Con precio de Hyperliquid no hace falta: coincide con la bolsa. */
 /* acciones de Binance (bStocks) fuera del horario de la bolsa de EE. UU.: hay menos gente comprando y vendiendo y la diferencia de precio es mayor: un 0,1 % más */
-const slipOf=k=>S.settings.slip+(onIB(k)&&srcOf(k)==='BF'&&catOf(k)!=='Cripto'?.0003:0)+(srcOf(k)==='BN'&&isBS(k)&&!sessOpen('us',Date.now())?.001:0);
+const slipOf0=k=>S.settings.slip+(onIB(k)&&srcOf(k)==='BF'&&catOf(k)!=='Cripto'?.0003:0)+(srcOf(k)==='BN'&&isBS(k)&&!sessOpen('us',Date.now())?.001:0);
+/* diferencia compra/venta real si es reciente (≤ 5 min); si no hay dato (IBKR, Hyperliquid o sin conexión) se usa la estimación fija */
+const sprOf=k=>{const x=market.spr&&market.spr[k];return x&&Date.now()-x.t<5*60e3?x.s:null;};
+/* deslizamiento = lo que sea mayor: la estimación de siempre o medio diferencial real (comprar a mercado paga el precio de venta) */
+const slipOf=k=>{const b=slipOf0(k),s=onIB(k)&&!isBS(k)?null:sprOf(k);return s!=null?Math.max(b,s/2):b;};
 const costOf=k=>2*feeOf(k)+2*slipOf(k);
 async function krFetch(list){
   if(KR.busy||!list.length)return;

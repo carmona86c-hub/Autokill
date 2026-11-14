@@ -27,7 +27,7 @@ const CAT_COM=new Set(['GOLD','SILVER','XAU','XAG','CL','OIL','WTI','BRENT','USO
 const isCom=n=>{n=String(n||'').toUpperCase();return CAT_COM.has(n)||/OIL|NATGAS|NATURALGAS|GASOLINE|GOLD|SILVER|COPPER|PLATIN|PALLAD|URANIUM|COFFEE|COCOA|SUGAR|WHEAT|CORN|SOYBEAN|COTTON|LUMBER/.test(n);};
 const CAT_FX=new Set(['EUR','JPY','GBP','CHF','AUD','CAD','NZD','MXN','CNH','CNY','TRY','BRL','INR','KRW','SEK','NOK','ZAR','EURUSD','USDJPY','GBPUSD','USDCHF','AUDUSD','USDCAD','DXY','USDX']);
 let S=null;
-const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{}};
+const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{},spr:{},sprAt:0};
 const ui={radar:[],summary:'',reasons:'',scanAt:0};
 const srcOf=k=>k.slice(0,2),idOf=k=>k.slice(3);
 /* datos de cada activo: los del mercado y, para posiciones abiertas, una copia guardada (sobrevive a recargas) */
@@ -244,6 +244,14 @@ async function pollPrices(){
         if(!hit){const [meta,ctxs]=await hl({type:'metaAndAssetCtxs',dex});meta.universe.forEach((u,i)=>{const id=u.name.includes(':')?u.name:dex+':'+u.name,k='HL:'+id,c=ctxs[i]||{};if(all.has(k))setPx(k,+(c.midPx||c.markPx));});}
         market.hlAt[dex]=Date.now();market.src.HL.at=Date.now();market.src.HL.ok=true;market.src.HL.err=null;}).catch(e=>fail('HL',e)));
     });
+  }
+  /* diferencia real entre el mejor precio de compra y de venta (libro de órdenes de Binance), una vez por minuto:
+     comprar a mercado paga el precio de venta y vender cobra el de compra, así que esa diferencia es un coste real */
+  if(Date.now()-market.sprAt>60000){market.sprAt=Date.now();
+    const bn=[...all].filter(k=>srcOf(k)==='BN'),bf=new Set([...all].filter(k=>srcOf(k)==='BF')),put=(k,x)=>{const b=+x.bidPrice,a=+x.askPrice;if(b>0&&a>=b)market.spr[k]={s:(a-b)/((a+b)/2),b,a,t:Date.now()};};
+    /* en paralelo y sin esperar: si el libro tarda, los precios no se retrasan */
+    if(bn.length)jget('/api/v3/ticker/bookTicker?symbols='+encodeURIComponent(JSON.stringify(bn.map(idOf)))).then(j=>{(Array.isArray(j)?j:[]).forEach(x=>put('BN:'+x.symbol,x));}).catch(()=>{});
+    if(bf.size)fget(FAPI+'/fapi/v1/ticker/bookTicker').then(j=>{(Array.isArray(j)?j:[]).forEach(x=>{const k='BF:'+x.symbol;if(bf.has(k))put(k,x);});}).catch(()=>{});
   }
   await Promise.all(jobs);
   market.err=Object.values(market.src).some(x=>x.ok&&Date.now()-x.at<90000)?null:'ninguna fuente responde';

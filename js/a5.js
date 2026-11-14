@@ -45,7 +45,7 @@ function applyCmd(c,a){
       S.runs=(prev.runs||[]).concat([run]).slice(-50);
       /* comparación con no hacer nada: se archiva la de la etapa que termina; la Mezcla de la nueva usa la proporción media de esta */
       {const B=prev.bench;if(B&&B.sum){run.bench={verdict:B.sum.verdict,adv:B.sum.adv,bot:B.sum.per.etapa.bot&&B.sum.per.etapa.bot.ret,rk:B.sum.per.etapa.rk&&B.sum.per.etapa.rk.ret,days:B.sum.days};const e=B.sum.exp;if(e.s+e.c>0)S.benchPrevS=e.s/(e.s+e.c);}
-       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;S.hist=prev.hist||[];S.krx=prev.krx;S.cupo=prev.cupo;S.tfOffK=prev.tfOffK;S.krVerdict=prev.krVerdict;
+       if(B&&B.ai)S.benchAI=B.ai;else if(prev.benchAI)S.benchAI=prev.benchAI;if(S.benchPrevS==null&&prev.benchPrevS!=null)S.benchPrevS=prev.benchPrevS;}S.graveyard=prev.graveyard||[];S.meta=prev.meta;S.lab=prev.lab;S.tfcmp=prev.tfcmp;S.sig=prev.sig;S.pause=prev.pause;S.hist=prev.hist||[];S.journal=prev.journal;S.krx=prev.krx;S.cupo=prev.cupo;S.tfOffK=prev.tfOffK;S.krVerdict=prev.krVerdict;
       ui.radar=[];ui.summary='';ui.scanAt=0;nextScan=0;L(null,'info',`Capital fijado en ${money(v)}. Saldo reiniciado; conserva la experiencia de ${Object.keys(S.exp).length} activos, sus parámetros afinados, el laboratorio de señales y el resumen de ${S.runs.length} etapa(s) anterior(es).`);
       const low=v<50?'Con menos de $50 casi no podrá operar: cada operación necesita al menos $5 y como mucho un 25 % del capital, así que solo cabe una posición a la vez y no podrá replicarse.':'';
       if(low)L(null,'info','Aviso: '+low);return ok('Capital fijado.'+(low?' '+low:''));}
@@ -384,3 +384,16 @@ $('impBtn').addEventListener('click',async()=>{
   keepAwake();render();tick(true);
   window.__automaton={get S(){return S;},market,KR,tick,eq,total,stats,alive,sessOpen,nextOpen,minsToClose,sessOf,spawnChild,fundChild,sendMsg,pruneDead,verifyConst,checkChild,lifecycle,kill,CONST_HASH};
 })();
+
+/* diario de cambios: apunta los cambios que haces tú (definido en a3.js; va aquí porque applyCmd se define en este archivo) */
+{const ac=applyCmd;applyCmd=function(c,a){
+  if(!JCMD[c])return ac.apply(this,arguments);
+  const snap=()=>JSON.parse(JSON.stringify({s:S.settings,p:(S.agents[0]||{}).params}));
+  const warn=c==='possell'||c==='unvault'?[]:testsRunning(),b0=snap(),r=ac.apply(this,arguments);
+  try{if(r&&r.ok&&!/^Sin cambios/.test(r.msg||'')){
+    const b1=snap(),d=jDiff(b0.s,b1.s).concat(jDiff(b0.p,b1.p).map(x=>'regla '+x));
+    if(c==='settings'&&!d.length)return r;
+    const what=`${JCMD[c]}${d.length?': '+d.join(' · '):''}${c==='capital'?` (${(r.msg||'').slice(0,80)})`:''}`;
+    jAdd('tú',c,what,warn);
+    if(warn.length&&c!=='possell')r.msg=(r.msg||'')+` Aviso: hay pruebas en marcha que este cambio altera (${warn.join('; ')}). Queda apuntado en el diario de cambios para separar el antes y el después.`;}}catch(e){}
+  return r;};}

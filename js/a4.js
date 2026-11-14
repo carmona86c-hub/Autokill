@@ -350,8 +350,10 @@ function renderStats(){
   drawChart(a);
 }
 /* reparto entre brókers (modo IBKR + Binance): cuánto hay en cada uno, cuánto está metido, el ahorro y el reparto recomendado */
+var splitEd=null; /* lo que estás escribiendo en «% en IBKR»: no se pisa al refrescar la pantalla */
 function renderRoute(){
   const box=$('routeCard');if(!box)return;box.hidden=!isMix();if(!isMix())return;
+  if(document.activeElement&&document.activeElement.id==='splitIn')return; /* escribiendo: no se redibuja (si no, se borra lo tecleado y se cierra el teclado) */
   const R=routeOf(),ad=routeAdvice(),ags=S.agents.filter(x=>x.status==='alive'),cur=splitIB();
   const row=v=>{const tot=ags.reduce((t,x)=>t+vtot(x,v),0),free=ags.reduce((t,x)=>t+freeV(x,v),0),inp=ags.reduce((t,x)=>t+x.positions.filter(p=>(p.ven||venOf(p.sym))===v).reduce((u,p)=>u+p.basis,0),0);
     const c=S.agents.flatMap(x=>x.closed).filter(x=>!x.user&&x.ven===v),pl=c.reduce((t,x)=>t+x.pnl,0);
@@ -361,9 +363,10 @@ function renderRoute(){
     <p class="note" style="margin:8px 0 0">Ahorro por elegir el más barato: <b class="${R.saved>=0?'up':'down'}">${sgn(R.saved)}</b> en ${R.nSaved} órdenes que podían ir a los dos.${R.miss.IB+R.miss.BN?` Le faltó dinero para entrar ${R.miss.IB} veces en IBKR y ${R.miss.BN} en Binance.`:''}</p>
     <p class="note" style="margin:8px 0 0">${ad.ready?`<b>Recomendado: ${Math.round(ad.share*100)} % en IBKR (${money(tot*ad.share)}) y ${Math.round((1-ad.share)*100)} % en Binance (${money(tot*(1-ad.share))}).</b> ${esc(cap(ad.why))}.${diff?'':' Coincide con el reparto actual.'}`:'Reparto recomendado: '+esc(ad.why)+'.'} Es un cálculo con datos pasados, no una garantía.</p>
     <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">${diff?`<button class="btn pri" type="button" data-split="${ad.share}">Aplicar ${Math.round(ad.share*100)} / ${Math.round((1-ad.share)*100)}</button>`:''}
-      <input id="splitIn" type="number" min="0" max="100" step="5" inputmode="numeric" value="${Math.round(cur*100)}" aria-label="Porcentaje en IBKR" style="width:80px"><button class="btn" type="button" data-split="in">Poner este % en IBKR</button></div>
+      <input id="splitIn" type="number" min="0" max="100" step="5" inputmode="numeric" value="${splitEd&&Date.now()-splitEd.t<120e3?splitEd.v:Math.round(cur*100)}" aria-label="Porcentaje en IBKR" style="width:80px"><button class="btn" type="button" data-split="in">Poner este % en IBKR</button></div>
     <p class="note" style="margin:8px 0 0">En real, el dinero no puede estar en los dos a la vez: aplicar un reparto equivale a una transferencia entre IBKR y Binance que harías tú. Para pasar a real con lo simulado, pon en cada uno al menos su «máx. a la vez».</p>`;
 }
+$('routeInfo')&&$('routeInfo').addEventListener('input',e=>{if(e.target&&e.target.id==='splitIn')splitEd={v:e.target.value,t:Date.now()};});
 $('routeInfo')&&$('routeInfo').addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('button[data-split]');if(!b)return;
   const v=b.dataset.split==='in'?(parseFloat($('splitIn').value)||0)/100:+b.dataset.split;const r=await act('split',{share:v});if(r&&r.msg)$('routeMsg').textContent=r.msg;renderRoute();});
 function renderOrders(){

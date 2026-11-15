@@ -114,7 +114,7 @@ function mkVerdict(k,an){
   if(ex.veto){t='Vetado por experiencia: a este agente le ha ido mal con este activo y no entra aunque haya señal.';cls='down';}
   else if(s+ex.adj>=P.minScore&&f.trend){t=(best==='long'?'Señal alcista':'Señal bajista (para cortos)')+`: supera la puntuación mínima del agente (${P.minScore}). Entraría si además cubre comisiones, el riesgo cabe y el mercado está abierto.`;cls=best==='long'?'up':'down';}
   else if(an.L.trend){t='Tendencia alcista, pero sin fuerza suficiente para que el agente entre todavía'+(an.rsi>P.rsiMax?' (RSI sobrecomprado).':an.rsi<P.rsiMin?' (RSI flojo).':!an.L.brk?' (falta romper el máximo de las últimas 20 velas).':'.');}
-  else if(an.Sh.trend){t=sh?'Tendencia bajista, aún sin fuerza para abrir un corto.':'Tendencia bajista: el agente no compra aquí'+(srcOf(k)==='BN'?' (en Binance contado no se abren cortos).':' (los cortos están desactivados).');}
+  else if(an.Sh.trend){t=sh?'Tendencia bajista, aún sin fuerza para abrir un corto.':'Tendencia bajista: el agente no compra aquí'+(srcOf(k)==='BN'?` (en ${BNN()} contado no se abren cortos).`:' (los cortos están desactivados).');}
   else t='Sin tendencia clara: las medias se cruzan y el agente esperaría.';
   if(!open)t+=' Ahora su mercado está cerrado, así que no opera.';
   return {t,cls,best,s:Math.max(0,Math.min(100,s+ex.adj)),adj:ex.adj,e:ex.e};

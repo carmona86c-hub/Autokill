@@ -260,7 +260,7 @@ canvas.mkc1{height:300px;margin-top:10px;touch-action:pan-y}canvas.mkc2{height:7
     <div class="card"><h2>Evolución del patrimonio</h2><canvas id="chart" aria-label="Gráfico de patrimonio"></canvas></div>
     <div class="card"><h2>Últimas operaciones</h2><div class="tw" id="trades"></div></div>
     <div class="card" id="routeCard" hidden><h2>Reparto entre brókers</h2><div id="routeInfo"></div><p id="routeMsg" class="note up" style="margin:8px 0 0"></p></div>
-    <div class="card"><h2>Órdenes al exchange</h2><p class="note" style="margin:0 0 8px">Cada compra y venta se construye como la orden real que recibiría el exchange (Binance o Hyperliquid), con sus redondeos y mínimos. Ahora se ejecutan en simulación: no se envía nada ni se usa dinero real.</p><div id="ordInfo" class="note" style="margin:0 0 8px"></div><div class="tw" id="ordT"></div></div>
+    <div class="card"><h2>Órdenes al exchange</h2><p class="note" style="margin:0 0 8px">Cada compra y venta se construye como la orden real que recibiría el bróker (Gate EU, IBKR o Alpaca), con sus redondeos y mínimos. Ahora se ejecutan en simulación: no se envía nada ni se usa dinero real.</p><div id="ordInfo" class="note" style="margin:0 0 8px"></div><div class="tw" id="ordT"></div></div>
     <div class="card"><h2>Informe para revisar</h2><p class="note" style="margin:0 0 8px">Resume resultados por agente, por tipo de mercado, al alza y a la baja, motivos de descarte y últimas operaciones. Cópialo y pégamelo en el chat para ajustar el agente con datos reales.</p>
       <button id="repBtn" class="btn pri" type="button">Copiar informe</button><p id="repMsg" class="note" style="margin:8px 0 0"></p>
       <textarea id="repTxt" rows="6" readonly aria-label="Informe" hidden style="width:100%;margin-top:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:11px var(--mono);padding:8px"></textarea></div>
@@ -328,14 +328,14 @@ canvas.mkc1{height:300px;margin-top:10px;touch-action:pan-y}canvas.mkc2{height:7
         <div class="field"><label class="lbl" for="sTf">Velas de decisión</label><select id="sTf"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option></select></div>
         <div class="field"><label class="lbl" for="s4h">Velas de 4 horas (solo criptos)</label><select id="s4h"><option value="auto">Lo decide el bot (según la prueba de marcos)</option><option value="1">Sí, siempre</option><option value="0">No</option></select></div>
       </div>
-      <p class="note" style="margin:8px 0 0">Precios reales en solo lectura. Las criptomonedas son las de más volumen en Binance. Binance Futuros cobra la mitad de comisión y Hyperliquid un 90 %. Si un agente pierde en el día más del máximo, no abre nada más hasta el día siguiente.</p>
+      <p class="note" style="margin:8px 0 0">Precios reales en solo lectura: los precios y velas se leen de los datos públicos de Binance y Hyperliquid, aunque en modo «+ Gate EU» la cripto se compra en Gate EU (las vigiladas son las de más volumen entre las que Gate EU tiene en USDC). Binance Futuros cobra la mitad de comisión y Hyperliquid un 90 %. Si un agente pierde en el día más del máximo, no abre nada más hasta el día siguiente.</p>
     </div>
     <div class="card">
       <h2>Mercados</h2>
       <div class="field" style="gap:10px">
         <div class="field"><label class="lbl" for="mSh">Operar a la baja (cortos)</label><select id="mSh"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
         <div class="field"><label class="lbl" for="mBN">Criptomonedas · Binance</label><select id="mBN"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
-        <div class="field"><label class="lbl" for="mCF">Criptomonedas en</label><select id="mCF"><option value="1">Binance Futuros (mitad de comisión)</option><option value="0">Binance contado</option></select></div>
+        <div class="field"><label class="lbl" for="mCF">Criptomonedas en</label><select id="mCF"><option value="1">Binance Futuros (mitad de comisión · solo modo exchanges)</option><option value="0">Binance contado</option></select></div>
         <div class="field"><label class="lbl" for="mBF">Oro, plata y TradFi · Binance Futuros</label><select id="mBF"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
         <div class="field"><label class="lbl" for="mHL">Acciones, índices, materias primas y divisas · Hyperliquid</label><select id="mHL"><option value="1">Activado</option><option value="0">Desactivado</option></select></div>
       </div>

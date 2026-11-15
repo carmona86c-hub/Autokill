@@ -195,7 +195,7 @@ async function handle(req, res) {
     }
     if (req.method === 'GET' && u.pathname === '/agent/state') {
       if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
-      const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN, alpaca: AL ? { cuenta: AL.acct, err: AL.err, enviadas: AL.sent, fallos: AL.fails, ultimas: AL.last.slice(0, 5) } : null }; STATE_MS = Date.now() - t0;
+      const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN, gate: (() => { try { return run('({pares:GATE.pairs?Object.keys(GATE.pairs).length:0,err:GATE.err})'); } catch (e) { return null; } })(), alpaca: AL ? { cuenta: AL.acct, err: AL.err, enviadas: AL.sent, fallos: AL.fails, ultimas: AL.last.slice(0, 5) } : null }; STATE_MS = Date.now() - t0;
       return send(res, 200, v);
     }
     if (req.method === 'POST' && u.pathname === '/agent/cmd') {
@@ -315,7 +315,15 @@ setInterval(async () => {
       try {
         let r;
         if (o.kind === 'cerrar') r = await alCall('DELETE', '/v2/positions/' + encodeURIComponent(o.p.symbol));  /* cierra lo que haya en la cuenta de práctica, aunque la cantidad difiera por redondeos */
-        else r = await alCall('POST', '/v2/orders', Object.assign({}, o.p, { client_order_id: ('am-' + o.t + '-' + o.kind).slice(0, 48) }));
+        else {
+          const body = Object.assign({}, o.p, { client_order_id: ('am-' + o.t + '-' + o.kind).slice(0, 48) });
+          try { r = await alCall('POST', '/v2/orders', body); }
+          catch (e) {  /* acción que Alpaca no permite comprar en fracciones: se compran acciones enteras con ese importe, si llega a una */
+            const n = body.notional && o.price > 0 ? Math.floor(body.notional / o.price) : 0;
+            if (!/fraction/i.test(e.message) || n < 1) throw e;
+            delete body.notional; body.qty = String(n); body.client_order_id = body.client_order_id.slice(0, 44) + '-w'; r = await alCall('POST', '/v2/orders', body);
+          }
+        }
         AL.sent++; AL.last.unshift({ t: Date.now(), sym: o.p.symbol, kind: o.kind, sim: o.price, id: r && (r.id || r.order_id) || null, status: r && r.status || 'enviada' });
       } catch (e) { AL.fails++; AL.err = e.message; AL.last.unshift({ t: Date.now(), sym: o.p.symbol, kind: o.kind, err: e.message }); log('Alpaca práctica:', e.message); }
       AL.last.length = Math.min(AL.last.length, 20);

@@ -657,7 +657,7 @@ function bmFetch(){
 }
 function bmQ(){const k=bmQKey();if(k&&pxFresh(k,120000))return market.price[k];return BMX.q&&Date.now()-BMX.qt<300000?BMX.q:null;}
 function bmB(){const k=(market.universe||[]).find(x=>srcOf(x)==='BN'&&base(x)==='BTC')||'BN:BTCUSDT';return pxFresh(k,120000)?market.price[k]:null;}
-const bmIbFee=(v,q)=>Math.min(Math.max(.35,.0035*v/q),v*.01);
+const bmIbFee=(v,q)=>isAlpaca()?.000003*v/q:Math.min(Math.max(.35,.0035*v/q),v*.01); /* comprar el Nasdaq (QQQ) en el bróker de acciones elegido */
 const bmSlip=()=>S.settings.slip||.0005;
 function bmTot(){return S.agents.reduce((t,a)=>t+eq(a)+(a.vault||0),0);}
 function bmExp(tot){let s=0,c=0;for(const a of S.agents)for(const p of a.positions){const v=Math.abs(p.qty*(market.price[p.sym]||p.entry));if(bmGrp(p.sym)==='stk')s+=v;else c+=v;}return {s:tot>0?s/tot:0,c:tot>0?c/tot:0};}

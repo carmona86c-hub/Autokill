@@ -352,7 +352,7 @@ function ruleOf(k){
 }
 /* en IBKR los cortos de acciones van por acciones enteras */
 /* IBKR solo admite fracciones de acción desde sus apps, no por programa (su API): un bot real solo puede comprar y vender acciones enteras */
-const wholeOnly=(k,sh)=>onIB(k)&&ibClass(k)==='stk'&&!isAlpaca(); /* Alpaca sí admite fracciones por su API (órdenes a mercado y del día) */
+const wholeOnly=(k,sh)=>onIB(k)&&ibClass(k)==='stk'&&(!isAlpaca()||!!sh); /* Alpaca: fracciones solo en compras; los cortos van por acciones enteras */ /* Alpaca sí admite fracciones por su API (órdenes a mercado y del día) */
 /* dinero disponible: en cuenta de efectivo, lo que viene de vender acciones no se puede usar hasta que se liquida (día hábil siguiente) */
 function freeCash(a){const n=Date.now();if(a.unset)a.unset=a.unset.filter(x=>x.at>n);return a.cash-(a.unset||[]).reduce((t,x)=>t+x.amt,0);}
 function settle(a,p,amt){if(onIB(p.sym)&&ibClass(p.sym)==='stk'&&!marginOK()&&amt>0){const at=nextOpen('us',Date.now()+3600e3);if(at)(a.unset=a.unset||[]).push({amt,at});}}

@@ -193,6 +193,11 @@ async function handle(req, res) {
       const n = await pushSend(b.text || '✅ Avisos activados: te llegarán las compras, ventas y cambios importantes aunque la app esté cerrada.');
       return send(res, 200, { ok: n > 0, msg: n > 0 ? 'Aviso de prueba enviado.' : 'No se pudo enviar el aviso de prueba.' });
     }
+    /* precio en vivo de lo que está abierto (consulta mínima: la app la hace cada 3 s para que la última vela se mueva casi en directo) */
+    if (req.method === 'GET' && u.pathname === '/agent/px') {
+      if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
+      return send(res, 200, run(`(()=>{const p={};S.agents.forEach(a=>a.positions.forEach(x=>{const v=market.price[x.sym];if(v>0)p[x.sym]=v;}));return {t:Date.now(),p};})()`));
+    }
     if (req.method === 'GET' && u.pathname === '/agent/state') {
       if (KEY && req.headers['x-agent-key'] !== KEY && u.searchParams.get('key') !== KEY) return send(res, 401, { error: 'clave incorrecta' });
       const t0 = Date.now(), v = run('exportView()'); v.server = { saved: saveInfo, github: !!TOKEN, gate: (() => { try { return run('({pares:GATE.pairs?Object.keys(GATE.pairs).length:0,err:GATE.err})'); } catch (e) { return null; } })(), alpaca: AL ? { cuenta: AL.acct, err: AL.err, enviadas: AL.sent, fallos: AL.fails, ultimas: AL.last.slice(0, 5) } : null }; STATE_MS = Date.now() - t0;

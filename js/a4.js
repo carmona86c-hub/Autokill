@@ -300,17 +300,30 @@ async function diagnose(){
   await step('Horario de la bolsa de EE. UU.',async()=>{const o=sessOpen('us',Date.now());const no=o?null:nextOpen('us');return o?'abierta ahora':'cerrada · abre '+new Date(no).toLocaleString('es-ES',{weekday:'long',hour:'2-digit',minute:'2-digit'})+' (tu hora)';});
   $('diagBtn').disabled=false;$('diagBtn').textContent='Comprobar conexión';
 }
+/* dónde se ejecutaría cada orden (los precios pueden venir de otra fuente: lo dice «Fuentes de precios») */
+function brokersBox(){
+  if(!isIB())return '';
+  const row=(on,name,note)=>`<div class="srcl"><span class="dot ${on?'on':''}"></span><span>${name}</span><span class="note">${note}</span></div>`;
+  let h='';
+  if(isMix()){const G=typeof SRV!=='undefined'&&SRV.gate,n=G?G.pares:(GATE.pairs?Object.keys(GATE.pairs).length:0),er=G?G.err:GATE.err;
+    h+=row(n>0,'Gate EU · cripto',n>0?`${n} pares en USDC · ${(gateFee()*100).toFixed(2).replace('.',',')} % por orden · solo compra (contado)`:er?'sin respuesta ('+esc(er)+')':'cargando pares…');}
+  if(isAlpaca()){const A=typeof SRV!=='undefined'&&SRV.alpaca,c=A&&A.cuenta;
+    h+=row(!!(c&&c.status==='ACTIVE'),'Alpaca · acciones',c?`cuenta de práctica ${c.status==='ACTIVE'?'activa':esc(c.status||'')} · ${money(+c.equity||0)} · ${A.enviadas||0} órdenes copiadas${A.fallos?' · '+A.fallos+' fallidas':''}`
+      :A&&A.err?'sin conexión ('+esc(A.err)+')':REM.on?'el servidor no tiene las claves de Alpaca':'conectada solo desde el servidor 24/7 (Ajustes → «Ver el del servidor»)');}
+  else h+=row(false,'IBKR · acciones','simulado con sus comisiones y reglas reales (sin conexión con IBKR)');
+  return `<div class="lbl" style="margin:10px 0 2px">Dónde opera (brókers)</div>`+h;
+}
 function renderMarkets(){
   const cats={};market.universe.forEach(k=>{const c=catOf(k);cats[c]=(cats[c]||0)+1;});
   const order=['Cripto','Acciones','Índices','Materias primas','Divisas','TradFi','Otros'];
   const chips=order.filter(c=>cats[c]).map(c=>`<span class="mk"><b>${cats[c]}</b> ${c}</span>`).join('');
   const src=['BN','BF','HL'].filter(x=>S.settings.markets[x]).map(x=>{const st=market.src[x]||{};const live=st.ok&&Date.now()-st.at<90000;
-    return `<div class="srcl"><span class="dot ${live?'on':''}"></span><span>${SRCNAME[x]}</span><span class="note">${live?market.lists[x].length+' activos'+((REM.on?(market.wsv||{})[x]:wsLive(x))?' · en directo':''):st.err?'sin respuesta ('+esc(st.err)+')':'conectando…'}</span></div>`;}).join('');
+    return `<div class="srcl"><span class="dot ${live?'on':''}"></span><span>${x==='BN'&&isMix()?'Binance (datos públicos)':SRCNAME[x]}</span><span class="note">${live?market.lists[x].length+' activos'+((REM.on?(market.wsv||{})[x]:wsLive(x))?' · en directo':''):st.err?'sin respuesta ('+esc(st.err)+')':'conectando…'}</span></div>`;}).join('');
   const by={};market.universe.forEach(k=>{const c=sessOf(k);(by[c]=by[c]||[]).push(k);});
   const now=Date.now(),hm=t=>new Date(t).toLocaleString('es-ES',{weekday:'short',hour:'2-digit',minute:'2-digit'});
   const ses=Object.keys(SESS).filter(c=>by[c]).map(c=>{const o=sessOpen(c,now),mc=o?minsToClose(c):0,no=o?null:nextOpen(c);
     return `<div class="srcl"><span class="dot ${o?'on':''}"></span><span>${SESS[c].name} <span class="note">· ${by[c].length}</span></span><span class="note">${o?(isFinite(mc)?'abierta · cierra en '+(mc>=60?Math.floor(mc/60)+' h '+(mc%60)+' min':mc+' min'):'abierta'):(no?'cerrada · abre '+hm(no):'cerrada')}</span></div>`;}).join('');
-  $('mkts').innerHTML=(chips?`<div class="mks">${chips}</div>`:'<div class="empty">Cargando mercados…</div>')+(ses?`<div class="lbl" style="margin:4px 0 2px">Horario</div>${ses}`:'')+`<div class="lbl" style="margin:10px 0 2px">Fuentes de precios</div>`+src+(krOn()?`<div class="lbl" style="margin:10px 0 2px">Cerebro IA</div><div class="srcl"><span class="dot ${KR.ok&&Date.now()-KR.at<20*60e3?'on':''}"></span><span>Kronos</span><span class="note">${KR.busy?'pensando…':KR.ok?esc((KR.model||'').split('/').pop())+' · '+(KR.ms/1000).toFixed(1).replace('.',',')+' s'+(KR.fake?' · simulado':''):KR.err?'sin respuesta ('+esc(KR.err)+'): opera solo con reglas':'esperando la primera consulta'}</span></div>`:'');
+  $('mkts').innerHTML=(chips?`<div class="mks">${chips}</div>`:'<div class="empty">Cargando mercados…</div>')+(ses?`<div class="lbl" style="margin:4px 0 2px">Horario</div>${ses}`:'')+brokersBox()+`<div class="lbl" style="margin:10px 0 2px">Fuentes de precios</div>`+src+(krOn()?`<div class="lbl" style="margin:10px 0 2px">Cerebro IA</div><div class="srcl"><span class="dot ${KR.ok&&Date.now()-KR.at<20*60e3?'on':''}"></span><span>Kronos</span><span class="note">${KR.busy?'pensando…':KR.ok?esc((KR.model||'').split('/').pop())+' · '+(KR.ms/1000).toFixed(1).replace('.',',')+' s'+(KR.fake?' · simulado':''):KR.err?'sin respuesta ('+esc(KR.err)+'): opera solo con reglas':'esperando la primera consulta'}</span></div>`:'');
 }
 const TAGS={open:'compra',close:'venta',reject:'rechazo',reserve:'reserva',spawn:'nace',evolve:'evolución',tier:'nivel',dead:'apagado',pause:'pausa',info:'info',life:'ciclo',msg:'mensaje',fund:'financia',scan:'revisión'};
 function renderLog(){

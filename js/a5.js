@@ -430,3 +430,22 @@ $('impBtn').addEventListener('click',async()=>{
     jAdd('tú',c,what,warn);
     if(warn.length&&c!=='possell')r.msg=(r.msg||'')+` Aviso: hay pruebas en marcha que este cambio altera (${warn.join('; ')}). Queda apuntado en el diario de cambios para separar el antes y el después.`;}}catch(e){}
   return r;};}
+
+/* ---------- precio casi en directo en el móvil ----------
+   El estado completo llega cada 15 s (es pesado). Mientras la app está a la vista, en el Panel y con algo abierto,
+   se pide además solo el precio de las posiciones cada 3 s: la última vela, el resultado y la barra hasta el
+   objetivo se mueven casi a la vez que en el servidor, sin cargarle (son unos pocos bytes). */
+const PXL={busy:false,at:0,fails:0};
+setInterval(async()=>{
+  try{
+    if(!REM.on||PXL.busy||document.visibilityState==='hidden'||tab!=='panel')return;
+    if(!S||!S.agents.some(a=>a.positions.length))return;
+    if(PXL.fails>=3&&Date.now()-PXL.at<60e3)return; /* si el servidor no lo tiene (versión vieja) o falla, se reintenta cada minuto */
+    PXL.busy=true;PXL.at=Date.now();
+    const hd=REM.key?{'X-Agent-Key':REM.key}:{};
+    const j=await fget(cleanUrl(REM.url)+'/agent/px',{headers:hd},4000);
+    if(!j||!j.p)throw new Error('sin datos');PXL.fails=0;
+    let ch=false;for(const [k,v] of Object.entries(j.p))if(v>0&&market.price[k]!==v){market.price[k]=v;ch=true;}
+    if(ch&&!busy){updateHero();renderPanel();}
+  }catch(e){PXL.fails++;}finally{PXL.busy=false;}
+},3000);

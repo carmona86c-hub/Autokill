@@ -43,7 +43,29 @@ function agentScan(a,manual){
     ui.summary=`${rows.length} activos con mercado abierto analizados en velas de ${tfs().join(' y ')}${cl?` (${cl} en mercados cerrados, en espera)`:''} · ${opened} operaciones nuevas`;
     ui.reasons=Object.entries(tally).sort((x,y)=>y[1]-x[1]).slice(0,4).map(([l,n])=>`${n} ${l}`).join(' · ');
     ui.scanAt=Date.now();
+    if(!manual)scanLine(a,P,rows,opened,tally,cl);
   }
+}
+/* ---------- una línea por revisión en el registro ----------
+   Los rechazos solo se apuntan cuando una señal estuvo cerca de entrar en tendencia a favor; con el mercado
+   cayendo (o cerrado) el registro se quedaba en blanco aunque el bot sí revisaba. Ahora cada revisión deja
+   una línea con lo analizado, lo mejor que vio y por qué no compró. Las revisiones seguidas sin nada más
+   en medio se funden en una sola (la más reciente), para no llenar el registro. */
+function scanLine(a,P,rows,opened,tally,cl){
+  try{
+    const best=rows.map(r=>r.reduce((m,z)=>z.score>m.score?z:m)).slice(0,3)
+      .map(z=>`${base(z.sym)} ${Math.round(z.score)}${z.trend?'':(z.short&&z.short.trend?' (bajista)':' (sin tendencia)')}`);
+    const mot=Object.entries(tally).sort((x,y)=>y[1]-x[1]).slice(0,3).map(([l,n])=>`${n} ${l}`);
+    const bt=typeof btcTrend==='function'?btcTrend(P):null;
+    let nota='';
+    if(bt==='down'&&isMix())nota=` Bitcoin bajista: en ${BNN()} (contado) no se puede vender en corto, así que las criptos esperan a que gire.`;
+    if(!rows.length)nota+=cl?' Todo lo vigilado tiene ahora el mercado cerrado.':' No hay activos con datos suficientes.';
+    const msg=`Revisión: ${rows.length} activos analizados en velas de ${tfs().join(', ')}${cl?` (${cl} con el mercado cerrado)`:''} · ${opened} compra${opened===1?'':'s'}.`
+      +(best.length?` Mejores: ${best.join(', ')} (mínimo ${Math.round(P.minScore)}).`:'')+(mot.length?` Por qué no: ${mot.join(' · ')}.`:'')+nota;
+    if(S.log[0]&&S.log[0].type==='scan')S.log.shift();
+    L(a,'scan',msg);
+    S.scanAt=Date.now();
+  }catch(e){}
 }
 
 /* ---------- replicación al estilo Automaton ----------

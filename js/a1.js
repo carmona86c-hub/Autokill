@@ -108,10 +108,12 @@ async function uniBN(){
     }catch(e){if(!/HTTP (4(18|29)|403|451)/.test((e&&e.message)||''))throw e;fail('BF',e);}
   }
   const t=await jget('/api/v3/ticker/24hr');
-  const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0)
+  /* con IBKR + Gate EU: se eligen las de más volumen ENTRE las que Gate EU tiene en USDC (si no, la mitad de las vigiladas no se podrían comprar) */
+  const gp=isMix()&&typeof gatePairs==='function'?gatePairs():null;
+  const list=t.filter(x=>x.symbol.endsWith('USDT')&&!STABLE.has(x.symbol.slice(0,-4))&&+x.lastPrice>0&&+x.quoteVolume>0&&(!gp||!!gp[x.symbol.slice(0,-4).toUpperCase()]))
     .sort((a,b)=>+b.quoteVolume-+a.quoteVolume).slice(0,S.settings.universe);
-  /* con IBKR + Binance también se siguen todas las acciones de Binance (bStocks), aunque no estén entre las de más volumen: son la otra vía para comprar acciones */
-  if(isMix()){const has=new Set(list.map(x=>x.symbol));t.forEach(x=>{const n=x.symbol.slice(0,-4);if(x.symbol.endsWith('USDT')&&!has.has(x.symbol)&&n.length>=3&&n.endsWith('B')&&n!=='BNB'&&BS_SET.has(n.slice(0,-1))&&+x.lastPrice>0&&+x.quoteVolume>0)list.push(x);});}
+  /* (antes, con Binance, aquí se añadían sus acciones tokenizadas; Gate EU no las tiene) */
+  if(isMix()&&!gp){const has=new Set(list.map(x=>x.symbol));t.forEach(x=>{const n=x.symbol.slice(0,-4);if(x.symbol.endsWith('USDT')&&!has.has(x.symbol)&&n.length>=3&&n.endsWith('B')&&n!=='BNB'&&BS_SET.has(n.slice(0,-1))&&+x.lastPrice>0&&+x.quoteVolume>0)list.push(x);});}
   market.lists.BN=list.map(x=>{const k='BN:'+x.symbol;market.meta[k]={name:x.symbol.slice(0,-4),cat:'Cripto',vol:+x.quoteVolume,o24:+x.openPrice||0};setPx(k,+x.lastPrice);return k;});
   await bnSpotRules(list.map(x=>x.symbol));
   market.cryptoSpot=S.settings.cryptoFut!==false;ok('BN');

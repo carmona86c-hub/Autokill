@@ -176,6 +176,11 @@ let STATE_MS = 0;
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   try {
+    /* diagnóstico de velas (datos públicos de mercado, sin nada de la cuenta): últimas velas que usa el bot y su ATR */
+    if (u.pathname === '/agent/kdiag') {
+      const k = String(u.searchParams.get('k') || 'BN:DOTUSDT').replace(/[^A-Za-z0-9:._-]/g, ''), tf = String(u.searchParams.get('tf') || '15m').replace(/[^0-9a-z]/g, '');
+      return send(res, 200, run(`(()=>{const c=(market.k[${JSON.stringify(tf)}]||{})[${JSON.stringify(k)}]||[];return {n:c.length,price:market.price[${JSON.stringify(k)}],atr:c.length>20?atr(c):null,last:c.slice(-12).map(x=>[new Date(x.t).toISOString().slice(5,16),x.o,x.h,x.l,x.c,x.v])};})()`));
+    }
     if (u.pathname === '/agent/health') return send(res, 200, { ok: true, ready: ready(), saved: saveInfo, github: !!TOKEN, keyRequired: !!KEY, diag: diag() });
     if (!ready()) return send(res, 503, { error: 'el agente está arrancando' });
     /* avisos push: clave pública (para suscribirse) y alta/baja de la suscripción del móvil */

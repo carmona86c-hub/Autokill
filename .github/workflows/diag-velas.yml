@@ -1,0 +1,16 @@
+# Diagnóstico manual: compara las velas que usa el bot con las de Binance (datos públicos).
+name: Diagnóstico de velas
+on:
+  workflow_dispatch:
+    inputs:
+      sym: {default: DOTUSDT}
+      tf: {default: 15m}
+permissions: {}
+jobs:
+  velas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: |
+          echo "== Binance (data-api) =="; curl -sS -m 30 "https://data-api.binance.vision/api/v3/klines?symbol=${{ inputs.sym }}&interval=${{ inputs.tf }}&limit=12"; echo
+          echo "== Bot =="; curl -sS -m 60 "https://autokill.onrender.com/agent/kdiag?k=BN:${{ inputs.sym }}&tf=${{ inputs.tf }}"; echo

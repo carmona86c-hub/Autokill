@@ -17,7 +17,9 @@ const px=p=>p>=100?p.toFixed(2):p>=1?p.toFixed(3):p.toPrecision(3);
 /* ---------- mercados reales: datos públicos de solo lectura, sin clave ----------
    BN = Binance contado (cripto) · BF = Binance Futuros TradFi (oro, plata…) · HL = Hyperliquid HIP-3 (acciones, índices, materias primas, divisas)
    Cada activo se identifica como "FUENTE:símbolo" (BN:BTCUSDT, BF:XAUUSDT, HL:xyz:TSLA). */
-const HOSTS=['https://data-api.binance.vision','https://api.binance.com','https://api1.binance.com','https://api.binance.us'];
+/* Solo Binance global. Binance.US es otro mercado (poco líquido: velas planas y sin volumen en muchas criptos) y no da los precios
+   reales de lo que se compra en Gate EU; por eso ya no se usa nunca como reserva. */
+const HOSTS=['https://data-api.binance.vision','https://api.binance.com','https://api1.binance.com','https://api2.binance.com','https://api3.binance.com'];
 const FAPI='https://fapi.binance.com',HLAPI='https://api.hyperliquid.xyz/info';
 const STABLE=new Set(['USDC','FDUSD','TUSD','USDP','DAI','USDE','EUR','EURI','AEUR','BUSD','USD1','XUSD','PAXG','XAUT','RLUSD','BFUSD','UST','USDS','PYUSD']);
 const SRCNAME={BN:'Binance',BF:'Binance Futuros',HL:'Hyperliquid'};
@@ -53,8 +55,10 @@ async function fget(url,opt,ms){
   finally{clearTimeout(to);}
 }
 async function jget(path){
+  /* si se pasó a un servidor de reserva, cada 5 min se vuelve a probar el principal */
+  if(market.host&&market.host!==HOSTS[0]&&Date.now()-(market.hostAt||0)>300e3)market.host=null;
   const order=market.host?[market.host,...HOSTS.filter(h=>h!==market.host)]:HOSTS;let err;
-  for(const h of order){try{const j=await fget(h+path);market.host=h;return j;}catch(e){err=e;}}
+  for(const h of order){try{const j=await fget(h+path);if(market.host!==h){market.host=h;market.hostAt=Date.now();}return j;}catch(e){err=e;}}
   throw err||new Error('sin conexión');
 }
 const hl=body=>fget(HLAPI,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

@@ -34,6 +34,11 @@ function migrate(s){
      con IBKR empieza de cero para no vetar con esos datos los pocos activos disponibles. La anterior queda archivada en expOld (una sola vez) */
   if(!s.settings.expIB){s.settings.expIB=1;if(Object.keys(s.exp).length){s.expOld=Object.assign({},s.expOld||{},s.exp);s.exp={};}}
   if(s.settings.cryptoFut===undefined){s.settings.cryptoFut=true;for(const k in s.exp)if(k.startsWith('BN:')){const nk='BF:'+k.slice(3),a=s.exp[k],b=s.exp[nk]||{n:0,w:0,pnl:0,sumPct:0};s.exp[nk]={n:a.n+b.n,w:a.w+b.w,pnl:a.pnl+b.pnl,sumPct:(a.sumPct||0)+(b.sumPct||0)};}}
+  /* Binance.US (velas planas, sin volumen) se coló como fuente de reserva: se quitan del laboratorio las señales de esos ratos */
+  if(!s.settings.usDataV1){s.settings.usDataV1=1;const bad=t=>(t>=Date.parse('2026-11-14T20:00:00Z')&&t<Date.parse('2026-11-14T22:00:00Z'))||t>=Date.parse('2026-11-17T00:00:00Z');
+    if(s.sig){const n0=(s.sig.list||[]).length+(s.sig.open||[]).length;s.sig.list=(s.sig.list||[]).filter(x=>!bad(x.t));s.sig.open=(s.sig.open||[]).filter(x=>!bad(x.t));s.sig.sumAt=0;
+      const n=n0-s.sig.list.length-s.sig.open.length;
+      (s.log=s.log||[]).unshift({t:Date.now(),a:'Sistema',type:'info',msg:`Arreglo de datos: cuando el servidor principal de Binance no respondía, el bot tomaba velas de Binance.US, otro mercado con muy poco movimiento (velas planas y sin volumen). Eso pasó el 14/11 de 21:00 a 23:00 y desde el 17/11 a la 01:00. Ya no se usa nunca Binance.US; se han quitado ${n} señales del laboratorio tomadas en esos ratos.`});}}
   return s;
 }
 const agentById=id=>S.agents.find(a=>a.id===id);

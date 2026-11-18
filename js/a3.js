@@ -407,12 +407,13 @@ let edgeC={at:0,m:{}};
 function edgeAdj(an){
   if(Date.now()-edgeC.at>60000){
     const lim=Date.now()-7*864e5,all=histOf().filter(x=>!x.user&&(x.t1||x.t||0)>=lim).slice(0,400),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
-    for(const d of ['long','short'])m['s:'+d]=f(all.filter(x=>(x.side||'long')===d));
+    /* dirección dentro de cada mercado: las pérdidas de largos en cripto no castigan los largos en acciones */
+    for(const c of new Set(all.map(x=>catOf(x.sym))))for(const d of ['long','short'])m['s:'+d+':'+c]=f(all.filter(x=>catOf(x.sym)===c&&(x.side||'long')===d));
     for(const c of new Set(all.map(x=>catOf(x.sym))))m['c:'+c]=f(all.filter(x=>catOf(x.sym)===c));
     edgeC={at:Date.now(),m};
   }
-  const d=an.side||'long',c=catOf(an.sym),s=edgeC.m['s:'+d]||0,k=edgeC.m['c:'+c]||0,why=[];
-  if(s)why.push((d==='short'?'cortos':'largos')+(s>0?' van bien':' van mal'));if(k)why.push(c+(k>0?' va bien':' va mal'));
+  const d=an.side||'long',c=catOf(an.sym),s=edgeC.m['s:'+d+':'+c]||0,k=edgeC.m['c:'+c]||0,why=[];
+  if(s)why.push((d==='short'?'cortos':'largos')+' en '+c+(s>0?' van bien':' van mal'));if(k)why.push(c+(k>0?' va bien':' va mal'));
   /* dirección y mercado casi siempre son lo mismo (largos de cripto): no se castiga dos veces por lo mismo */
   return {adj:Math.max(-10,s+k),why:why.join(', ')};
 }

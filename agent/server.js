@@ -342,6 +342,36 @@ setInterval(async () => {
   } catch (e) { log('Alpaca práctica:', e.message); }
 }, 10e3).unref();
 
+/* cada 30 min: qué acciones de la simulación (precios de Hyperliquid) existen de verdad en Alpaca y son el MISMO valor.
+   Hyperliquid tiene contratos sobre empresas que no cotizan en EE. UU. (SpaceX, SK Hynix, CXMT…) y algunos usan un
+   símbolo que en Alpaca es otra cosa (SPCX es un ETF de SPAC, no SpaceX). Se comprueba que el valor exista y se pueda
+   operar en Alpaca y que su precio (datos IEX de Alpaca) no se aparte más de un 3 % del de Hyperliquid. */
+async function alVerify() {
+  if (!AL || !ready()) return;
+  try {
+    const pairs = run(`(market.lists.HL||[]).filter(k=>catOf(k)==='Acciones').map(k=>[k,String(base(k)).toUpperCase(),market.price[k]||0])`);
+    if (!pairs.length) return;
+    const syms = [...new Set(pairs.map(x => x[1]))].filter(x => /^[A-Z.]{1,6}$/.test(x)), snap = {};
+    for (let i = 0; i < syms.length; i += 50) {
+      const ch = syms.slice(i, i + 50), r = await fetch('https://data.alpaca.markets/v2/stocks/snapshots?feed=iex&symbols=' + ch.join(','), { headers: AL.h });
+      if (!r.ok) throw new Error('datos de Alpaca ' + r.status); Object.assign(snap, await r.json());
+    }
+    const m = {};
+    for (const [k, sym, hp] of pairs) {
+      if (m[sym]) continue;
+      let a = null; try { a = await alCall('GET', '/v2/assets/' + encodeURIComponent(sym)); } catch (e) { }
+      const sn = snap[sym] || {}, ap = +((sn.latestTrade && sn.latestTrade.p) || (sn.dailyBar && sn.dailyBar.c) || (sn.prevDailyBar && sn.prevDailyBar.c) || 0);
+      const dif = hp > 0 && ap > 0 ? Math.abs(hp / ap - 1) : null;
+      const why = !a ? 'no existe en Alpaca' : !a.tradable || a.status !== 'active' ? 'no se puede operar en Alpaca' : !ap ? 'sin precio en Alpaca' : dif > .03 ? `es otro valor (Hyperliquid ${hp.toPrecision(5)} frente a Alpaca ${ap.toPrecision(5)})` : '';
+      m[sym] = { ok: !why, frac: !!(a && a.fractionable), px: ap, why };
+    }
+    run(`(()=>{const nv=${JSON.stringify({ at: Date.now(), m: m })},old=S.alpacaOK&&S.alpacaOK.m||{};S.alpacaOK=nv;market.uniAt=0;
+      const bad=Object.entries(nv.m).filter(([s,v])=>!v.ok),nuevo=bad.filter(([s,v])=>!old[s]||old[s].ok);
+      if(nuevo.length){const a=S.agents.find(x=>x.status==='alive')||S.agents[0];L(a,'info','Alpaca: se dejan fuera '+nuevo.map(([s,v])=>s+' ('+v.why+')').join(', ')+'. Solo se opera lo que existe en Alpaca y es el mismo valor que se analiza.');}})()`);
+  } catch (e) { log('Alpaca verificación:', e.message); }
+}
+if (AL) { setTimeout(alVerify, +(process.env.ALV_MS || 90e3)); setInterval(alVerify, 30 * 60e3).unref(); }
+
 process.on('uncaughtException', e => log('Error no capturado:', e));
 process.on('unhandledRejection', e => log('Promesa rechazada:', e));
 main().catch(e => { log('Fallo al arrancar', e); process.exit(1); });

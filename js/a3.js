@@ -1239,6 +1239,8 @@ function idleCheck(a){
     S.idleAt=now;const c={};
     S.log.filter(e=>e.type==='reject'&&now-e.t<864e5).forEach(e=>{const m=(e.msg.split(': ').slice(1).join(': ')||e.msg).replace(/\(.*?\)/g,'').replace(/[−-]?[0-9][0-9.,]*/g,'#').trim();c[m]=(c[m]||0)+1;});
     const top=Object.entries(c).sort((x,y)=>y[1]-x[1]).slice(0,4).map(([m,n])=>`${m} (${n})`).join(' · ');
-    L(a,'info',`24 h sin comprar. Lo que más lo ha frenado: ${top||'no hubo señales cerca de entrar'}. No se fuerza ninguna compra: con el mercado en contra solo sumaría comisiones; en cuanto haya señales que cubran los costes, volverá a operar.`);
+    const lab=(S.sig&&S.sig.list||[]).filter(x=>x.res&&now-x.t<864e5&&Math.abs(x.r)<10),lw=lab.filter(x=>x.r>0).length,lm=lab.length?lab.reduce((t,x)=>t+x.r,0)/lab.length:0;
+    const labTxt=lab.length>=10?` Comprobado en el laboratorio: las ${lab.length} señales que dejó pasar ese día habrían ganado ${Math.round(lw/lab.length*100)} % de las veces, con una media de ${lm.toFixed(2).replace('.',',')} R por operación (${lm<0?'rechazarlas evitó pérdidas':'ojo: rechazarlas costó ganancias; la automejora lo tendrá en cuenta'}).`:'';
+    L(a,'info',`24 h sin comprar. Lo que más lo ha frenado: ${top||'no hubo señales cerca de entrar'}.${labTxt} No se fuerza ninguna compra: con el mercado en contra solo sumaría comisiones; en cuanto haya señales que cubran los costes, volverá a operar.`);
   }catch(e){}
 }

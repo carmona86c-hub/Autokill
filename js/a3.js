@@ -64,6 +64,7 @@ function scanLine(a,P,rows,opened,tally,cl){
       +(best.length?` Mejores: ${best.join(', ')} (mínimo ${Math.round(P.minScore)}).`:'')+(mot.length?` Por qué no: ${mot.join(' · ')}.`:'')+nota;
     if(S.log[0]&&S.log[0].type==='scan')S.log.shift();
     L(a,'scan',msg);
+    idleCheck(a);
     S.scanAt=Date.now();
   }catch(e){}
 }
@@ -405,14 +406,15 @@ function checkRollback(a){
 let edgeC={at:0,m:{}};
 function edgeAdj(an){
   if(Date.now()-edgeC.at>60000){
-    const all=histOf().filter(x=>!x.user).slice(0,400),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
+    const lim=Date.now()-7*864e5,all=histOf().filter(x=>!x.user&&(x.t1||x.t||0)>=lim).slice(0,400),m={},f=xs=>{xs=xs.slice(0,40);if(xs.length<12)return 0;const v=xs.reduce((t,x)=>t+x.pct,0)/xs.length;return v<-.002?-10:v>.004?5:0;};
     for(const d of ['long','short'])m['s:'+d]=f(all.filter(x=>(x.side||'long')===d));
     for(const c of new Set(all.map(x=>catOf(x.sym))))m['c:'+c]=f(all.filter(x=>catOf(x.sym)===c));
     edgeC={at:Date.now(),m};
   }
   const d=an.side||'long',c=catOf(an.sym),s=edgeC.m['s:'+d]||0,k=edgeC.m['c:'+c]||0,why=[];
   if(s)why.push((d==='short'?'cortos':'largos')+(s>0?' van bien':' van mal'));if(k)why.push(c+(k>0?' va bien':' va mal'));
-  return {adj:s+k,why:why.join(', ')};
+  /* dirección y mercado casi siempre son lo mismo (largos de cripto): no se castiga dos veces por lo mismo */
+  return {adj:Math.max(-10,s+k),why:why.join(', ')};
 }
 function evoReport(){
   const lines=[];
@@ -1226,3 +1228,17 @@ function linkText(){
 
 /* el cambio de Binance a Gate EU queda en el diario de cambios (una vez) */
 {const s9=sigTick;sigTick=function(){s9.apply(this,arguments);try{if(S.settings.gateV1&&isMix()&&!S.gateJ){S.gateJ=1;jAdd('bot','exchange','Cambio de exchange: Binance → Gate EU (Binance no deja operar desde España desde el 1 jul 2026). Comisión 0,10 % al comprar y al vender, pares USDC, sin BNB ni acciones tokenizadas.');}}catch(e){}};}
+
+/* ---------- 24 h sin comprar: diagnóstico ----------
+   No se obliga a ganar cada día (forzar operaciones con el mercado en contra solo suma comisiones y pérdidas),
+   pero si pasan 24 h sin ninguna compra el bot lo dice y explica qué lo frena, con los rechazos de ese día. */
+function idleCheck(a){
+  try{
+    const now=Date.now(),last=Math.max(0,...S.log.filter(e=>e.type==='open').map(e=>e.t),...a.positions.map(p=>p.t0||0));
+    if(now-last<864e5||now-(S.idleAt||0)<864e5||!last)return;
+    S.idleAt=now;const c={};
+    S.log.filter(e=>e.type==='reject'&&now-e.t<864e5).forEach(e=>{const m=(e.msg.split(': ').slice(1).join(': ')||e.msg).replace(/\(.*?\)/g,'').replace(/[−-]?[0-9][0-9.,]*/g,'#').trim();c[m]=(c[m]||0)+1;});
+    const top=Object.entries(c).sort((x,y)=>y[1]-x[1]).slice(0,4).map(([m,n])=>`${m} (${n})`).join(' · ');
+    L(a,'info',`24 h sin comprar. Lo que más lo ha frenado: ${top||'no hubo señales cerca de entrar'}. No se fuerza ninguna compra: con el mercado en contra solo sumaría comisiones; en cuanto haya señales que cubran los costes, volverá a operar.`);
+  }catch(e){}
+}

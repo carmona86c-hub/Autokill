@@ -60,7 +60,7 @@ function scanLine(a,P,rows,opened,tally,cl){
     let nota='';
     if(bt==='down'&&isMix())nota=` Bitcoin bajista: en ${BNN()} (contado) no se puede vender en corto, así que las criptos esperan a que gire.`;
     if(!rows.length)nota+=cl?' Todo lo vigilado tiene ahora el mercado cerrado.':' No hay activos con datos suficientes.';
-    const msg=`Revisión: ${rows.length} activos analizados en velas de ${tfs().join(', ')}${cl?` (${cl} con el mercado cerrado)`:''} · ${opened} compra${opened===1?'':'s'}.`
+    const msg=`Revisión: ${rows.length} activos analizados en velas de ${tfs().join(', ')}${cl?` (${cl} con el mercado cerrado)`:''} · ${opened} entrada${opened===1?'':'s'} (compra u orden límite).`
       +(best.length?` Mejores: ${best.join(', ')} (mínimo ${Math.round(P.minScore)}).`:'')+(mot.length?` Por qué no: ${mot.join(' · ')}.`:'')+nota;
     if(S.log[0]&&S.log[0].type==='scan')S.log.shift();
     L(a,'scan',msg);
@@ -572,7 +572,8 @@ function sigResolve(){
     const p={sh,e,r:s.sd,atr,stop:sh?e+s.sd:e-s.sd,tp:sh?e-P.tpATR*atr:e+P.tpATR*atr,cap:0,high:e,low:e,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
     let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,res:x.why};break;}}
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
-    G.list.unshift({v:2,id:s.id,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2)});
+    const rpb=pbSim(s,sr,ef,es,i0,P,cost,atr);
+    G.list.unshift({v:2,id:s.id,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2),rp:rpb==null?null:+rpb.toFixed(3)});
   }
   G.open=keep;sigTrim(G);
 }
@@ -1245,3 +1246,72 @@ function idleCheck(a){
     L(a,'info',`24 h sin comprar. Lo que más lo ha frenado: ${top||'no hubo señales cerca de entrar'}.${labTxt} No se fuerza ninguna compra: con el mercado en contra solo sumaría comisiones; en cuanto haya señales que cubran los costes, volverá a operar.`);
   }catch(e){}
 }
+/* =====================================================================================
+   ENTRADA EN RETROCESO (orden límite)
+   Lo que mostró el laboratorio (531 señales): 3 de cada 4 compras acababan en el stop y de media solo llegaban a ir
+   0,2-0,3R a favor. El bot compraba al final del impulso, justo cuando se agota. Ahora, cuando una señal es buena,
+   no compra a mercado: deja una orden límite medio ATR por debajo (por encima en cortos) durante 4 velas de su marco.
+   Si el precio retrocede hasta ahí, compra a ese precio, con el mismo stop y objetivo en distancia: mejor precio,
+   menos riesgo real y más recorrido. Si no retrocede, la orden caduca y no se pierde nada.
+   Es una orden real que existe en Gate EU y en Alpaca; se llena solo si el precio la toca.
+   El laboratorio mide cada señal de las dos formas (a mercado y en retroceso) y, si en 40 casos o más
+   la entrada en retroceso sale peor, el bot vuelve solo a comprar a mercado y lo apunta.
+   ===================================================================================== */
+const PB={k:.5,bars:4};
+const pbOn=()=>S.settings.entryMode!=='mercado';
+/* simulación en el laboratorio: orden a e∓k·ATR durante PB.bars velas; si el mismo vela de la entrada toca el stop, se cuenta como stop (lo peor) */
+function pbSim(s,sr,ef,es,i0,P,cost,atr){
+  try{
+    const sh=!!s.sh,lim=sh?s.e+PB.k*atr:s.e-PB.k*atr,sd=s.sd;
+    for(let i=i0;i<Math.min(sr.k.length,i0+PB.bars);i++){const k=sr.k[i];
+      if(sh?k.h<lim:k.l>lim)continue;
+      const stop=sh?lim+sd:lim-sd;if(sh?k.h>=stop:k.l<=stop)return -1-cost*lim/sd;
+      const p={sh,e:lim,r:sd,atr,stop,tp:sh?lim-P.tpATR*atr:lim+P.tpATR*atr,cap:0,high:lim,low:lim,bars:0,half:false,run:false,r1:0,mfe:0,mae:0};
+      for(let j=i+1;j<sr.k.length;j++){const x=posStep(p,sr.k[j],ef[j],es[j],P,cost);if(x){const rr=(sh?lim-x.px:x.px-lim)/lim-cost,fr=p.half?(p.r1+rr)/2:rr;return fr*lim/sd;}}
+      return null; /* aún abierta: no cuenta */
+    }
+    return null; /* no llegó a retroceder: no habría comprado */
+  }catch(e){return null;}
+}
+const pendOf=()=>S.pend||(S.pend=[]);
+{const o7=openPos;openPos=function(a,an,P){
+  if(!pbOn()||an.pbFill||!(an.atr>0)||!(an.price>0))return o7.apply(this,arguments);
+  const Q=pendOf();if(Q.some(q=>q.aid===a.id&&q.sym===an.sym))return 'ya tiene una orden límite puesta';
+  if(Q.filter(q=>q.aid===a.id).length>=4)return 'ya tiene 4 órdenes límite esperando';
+  const sh=an.side==='short',lim=rp(an.sym,sh?an.price+PB.k*an.atr:an.price-PB.k*an.atr);
+  const keep={};for(const f of ['sym','side','tf','atr','price','score','kr','sessAs','via','nerv','prob','trend','rsi'])if(an[f]!==undefined)keep[f]=an[f];
+  Q.push({aid:a.id,sym:an.sym,side:an.side||'long',tf:an.tf,lim,p0:an.price,t:Date.now(),exp:Date.now()+PB.bars*(TF_MS[an.tf]||9e5),an:keep});
+  L(a,'order',`Orden límite: ${sh?'venta en corto':'compra'} de ${base(an.sym)} a ${px(lim)} (ahora ${px(an.price)}). Espera un retroceso de medio ATR durante ${PB.bars} velas de ${an.tf}; si no llega, caduca sin coste.`);
+  return null;
+};}
+function pendTick(){
+  try{
+    const Q=S&&S.pend;if(!Q||!Q.length)return;const now=Date.now();
+    for(const q of Q.slice()){
+      const a=S.agents.find(x=>x.id===q.aid),i=Q.indexOf(q),drop=()=>Q.splice(Q.indexOf(q),1);
+      if(!a||a.status!=='alive'||!S.running){drop();continue;}
+      if(a.positions.some(p=>p.sym===q.sym)){drop();continue;}
+      const px0=pxFresh(q.sym,60000)?market.price[q.sym]:null;
+      if(now>q.exp){drop();L(a,'order',`Orden límite de ${base(q.sym)} caducada: no retrocedió hasta ${px(q.lim)} (precio ${px0?px(px0):'—'}). No compró.`);continue;}
+      if(!px0||!isOpen(q.sym)||!pbOn())continue;
+      const sh=q.side==='short';if(sh?px0<q.lim:px0>q.lim)continue;
+      drop();
+      const P=a.life==='recovering'?{...a.params,riskPct:a.params.riskPct/2}:a.params;
+      const lim=(typeof dayLoss==='function'?dayLoss(a):0)<=-(S.settings.maxDay||.03);if(lim){L(a,'order',`Orden límite de ${base(q.sym)} anulada: límite de pérdida diaria.`);continue;}
+      const err=openPos(a,Object.assign({},q.an,{price:q.lim,pbFill:true}),P);
+      if(err)L(a,'order',`Orden límite de ${base(q.sym)} tocada a ${px(q.lim)} pero no se pudo comprar: ${err}.`);
+    }
+  }catch(e){}
+}
+setInterval(pendTick,2000);
+/* juicio: con 40 señales o más medidas de las dos formas, si la entrada en retroceso sale peor de forma clara, se vuelve a mercado (y al revés) */
+function pbJudge(){
+  try{
+    const L2=(S.sig&&S.sig.list||[]).filter(x=>x.rp!=null&&Math.abs(x.r)<10&&Math.abs(x.rp)<10);if(L2.length<40)return;
+    const d=L2.map(x=>x.rp-x.r),n=d.length,m=d.reduce((t,v)=>t+v,0)/n,sd=Math.sqrt(d.reduce((t,v)=>t+(v-m)**2,0)/(n-1))||1,t=m/(sd/Math.sqrt(n));
+    const cur=S.settings.entryMode||'retroceso',want=t<=-2?'mercado':t>=2?'retroceso':cur;
+    S.pbStat={n,m:+m.toFixed(3),t:+t.toFixed(2),at:Date.now(),mr:+(L2.reduce((x,y)=>x+y.r,0)/n).toFixed(3),mp:+(L2.reduce((x,y)=>x+y.rp,0)/n).toFixed(3)};
+    if(want!==cur){S.settings.entryMode=want;L(null,'evolve',`Entrada: pasa a comprar ${want==='mercado'?'a mercado':'en retroceso (orden límite)'}. En ${n} señales medidas de las dos formas, en retroceso ${S.pbStat.mp}R de media frente a ${S.pbStat.mr}R a mercado (t = ${t.toFixed(1)}).`);}
+  }catch(e){}
+}
+setInterval(pbJudge,30*60e3);

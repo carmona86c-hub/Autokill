@@ -317,7 +317,7 @@ const IB_NOT_US=new Set(['SKHY','SMSN','ANT','UNITREE','OPENAI','XAI','ANTHROPIC
 function ibOK(k){const m=metaOf(k)||{},c=catOf(k);if(c==='Cripto')return isMix()?vensOf(k).length>0:IB_CRYPTO.has(base(k));
   if(c==='Divisas'&&isAlpaca())return false; /* Alpaca no opera divisas */
   /* Alpaca: solo lo que el servidor ha comprobado que existe allí y es el mismo valor (ver alVerify en el servidor) */
-  if(c==='Acciones'&&isAlpaca()&&S.alpacaOK&&S.alpacaOK.m){const v=S.alpacaOK.m[String(base(k)).toUpperCase()];if(!v||!v.ok)return false;}
+  if(c==='Acciones'&&isAlpaca()&&srcOf(k)!=='AL'&&S.alpacaOK&&S.alpacaOK.m){const v=S.alpacaOK.m[String(base(k)).toUpperCase()];if(!v||!v.ok)return false;}
   if(c==='Índices'||c==='Materias primas'||c==='TradFi'||isCom(base(k)))return false;if(c==='Acciones'&&IB_NOT_US.has(String(base(k)).toUpperCase()))return false;
   return !['hk','krx','shanghai'].includes(m.sess);}
 const IB_MARGIN=2000;

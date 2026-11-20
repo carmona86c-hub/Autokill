@@ -22,14 +22,14 @@ const px=p=>p>=100?p.toFixed(2):p>=1?p.toFixed(3):p.toPrecision(3);
 const HOSTS=['https://data-api.binance.vision','https://api.binance.com','https://api1.binance.com','https://api2.binance.com','https://api3.binance.com'];
 const FAPI='https://fapi.binance.com',HLAPI='https://api.hyperliquid.xyz/info';
 const STABLE=new Set(['USDC','FDUSD','TUSD','USDP','DAI','USDE','EUR','EURI','AEUR','BUSD','USD1','XUSD','PAXG','XAUT','RLUSD','BFUSD','UST','USDS','PYUSD']);
-const SRCNAME={BN:'Binance',BF:'Binance Futuros',HL:'Hyperliquid'};
+const SRCNAME={BN:'Binance',BF:'Binance Futuros',HL:'Hyperliquid',AL:'Alpaca (datos IEX)'};
 const CAT_IDX=new Set(['XYZ100','US500','SPX','SP500','USA500','NDX','NAS100','NASDAQ','US100','USTECH','DJI','US30','DOW','RUSSELL','RUT','US2000','JP225','NIKKEI','DAX','GER40','DE40','UK100','FTSE','HK50','HSI','KOSPI','EU50','STOXX','CAC40','VIX','SMALL2000','MAG7','SEMIS']);
 const CAT_COM=new Set(['GOLD','SILVER','XAU','XAG','CL','OIL','WTI','BRENT','USOIL','UKOIL','NATGAS','NG','GAS','COPPER','HG','PLATINUM','PLAT','XPT','PALLADIUM','XPD','URANIUM','URNM','CORN','WHEAT','SOY','SOYBEAN','COFFEE','COCOA','SUGAR','COTTON','LUMBER','ALUMINIUM','ALUMINUM','NICKEL','ZINC']);
 /* materias primas con otros nombres (BRENTOIL, CRUDEOIL, NATURALGAS…): un nombre así nunca es una acción */
 const isCom=n=>{n=String(n||'').toUpperCase();return CAT_COM.has(n)||/OIL|NATGAS|NATURALGAS|GASOLINE|GOLD|SILVER|COPPER|PLATIN|PALLAD|URANIUM|COFFEE|COCOA|SUGAR|WHEAT|CORN|SOYBEAN|COTTON|LUMBER/.test(n);};
 const CAT_FX=new Set(['EUR','JPY','GBP','CHF','AUD','CAD','NZD','MXN','CNH','CNY','TRY','BRL','INR','KRW','SEK','NOK','ZAR','EURUSD','USDJPY','GBPUSD','USDCHF','AUDUSD','USDCAD','DXY','USDX']);
 let S=null;
-const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[]},universe:[],src:{BN:{},BF:{},HL:{}},host:null,err:null,uniAt:0,hlAt:{},spr:{},sprAt:0};
+const market={price:{},pt:{},k:{},meta:{},rules:{},fund:{},rulesAt:{},lists:{BN:[],BF:[],HL:[],AL:[]},universe:[],src:{BN:{},BF:{},HL:{},AL:{}},host:null,err:null,uniAt:0,hlAt:{},spr:{},sprAt:0};
 const ui={radar:[],summary:'',reasons:'',scanAt:0};
 const srcOf=k=>k.slice(0,2),idOf=k=>k.slice(3);
 /* datos de cada activo: los del mercado y, para posiciones abiertas, una copia guardada (sobrevive a recargas) */
@@ -160,6 +160,18 @@ async function uniHL(){
   market.lists.HL=Object.values(best).sort((a,b)=>b.v-a.v).slice(0,cap).map(x=>{const k='HL:'+x.id;market.meta[k]={name:x.name,cat:x.cat,vol:x.v,o24:x.o24};setPx(k,x.p);return k;});
   ok('HL');
 }
+/* ---------- ETF inversos de EE. UU. (precios de Alpaca) ----------
+   Suben cuando su índice baja: con cuenta de contado (sin margen, sin cortos) son la forma real de ganar en las caídas.
+   Solo en el servidor, que tiene las claves de Alpaca (alData); los precios son los de Alpaca (mercado IEX). */
+const AL_INV=['SQQQ','SPXS','SPXU','SDOW','TZA','SRTY','SOXS','TECS','FAZ','LABD','SH','PSQ','SDS','QID','DOG','RWM','TSLQ','NVDS'];
+const alOn=()=>typeof alData==='function'&&isAlpaca();
+const AL_TF={'1m':'1Min','5m':'5Min','15m':'15Min','1h':'1Hour','4h':'4Hour'};
+async function uniAL(){
+  const j=await alData('/v2/stocks/snapshots?feed=iex&symbols='+AL_INV.join(','));
+  market.lists.AL=AL_INV.filter(sym=>j&&j[sym]).map(sym=>{const x=j[sym],p=+((x.latestTrade&&x.latestTrade.p)||(x.dailyBar&&x.dailyBar.c)||(x.prevDailyBar&&x.prevDailyBar.c)||0);
+    if(!p)return null;const k='AL:'+sym,b=x.prevDailyBar||x.dailyBar||{};market.meta[k]={name:sym,cat:'Acciones',vol:(+b.v||0)*p*30,o24:+((x.prevDailyBar&&x.prevDailyBar.c)||0),sess:'us',inv:true};setPx(k,p);return k;}).filter(Boolean);
+  ok('AL');
+}
 async function loadUniverse(){
   const m=S.settings.markets,jobs=[];
   if(m.BN){if(!cooling('BN'))jobs.push(uniBN().catch(e=>fail('BN',e)));}else market.lists.BN=[];
@@ -167,8 +179,9 @@ async function loadUniverse(){
   const j2=[];
   if(m.BF){if(!cooling('BF'))j2.push(uniBF().catch(e=>fail('BF',e)));}else market.lists.BF=[];
   if(m.HL){if(!cooling('HL'))j2.push(uniHL().catch(e=>fail('HL',e)));}else market.lists.HL=[];
+  if(alOn()){if(!cooling('AL'))j2.push(uniAL().catch(e=>fail('AL',e)));}else market.lists.AL=[];
   await Promise.all(j2);
-  market.universe=[...market.lists.BN,...market.lists.BF,...market.lists.HL].sort((a,b)=>(market.meta[b].vol||0)-(market.meta[a].vol||0));
+  market.universe=[...market.lists.BN,...market.lists.BF,...market.lists.HL,...market.lists.AL].sort((a,b)=>(market.meta[b].vol||0)-(market.meta[a].vol||0));
   /* con IBKR solo se vigila lo que IBKR permite operar */
   if(isIB())market.universe=market.universe.filter(k=>ibOK(k)||bsAlt(k));
   market.uniAt=Date.now();
@@ -231,7 +244,7 @@ function nextOpen(cls,t=Date.now()){const c=noCache[cls];if(c&&c>t)return c;for(
 const uni=()=>market.universe;
 async function pollPrices(){
   const need=new Set();S.agents.forEach(a=>a.positions.forEach(p=>need.add(p.sym)));
-  const all=new Set([...market.universe,...need]),by={BN:[],BF:[],HL:[]};
+  const all=new Set([...market.universe,...need]),by={BN:[],BF:[],HL:[],AL:[]};
   /* con su mercado cerrado no hace falta precio continuo, pero cada fuente se consulta al menos una vez por minuto para saber que sigue conectada */
   const stale=s=>!(market.src[s]&&market.src[s].ok&&Date.now()-market.src[s].at<60000);
   all.forEach(k=>{const s=srcOf(k);if(by[s]&&!cooling(s)&&!wsLive(s)&&(need.has(k)||isOpen(k)||Date.now()-market.uniAt<20000||stale(s)))by[s].push(k);});
@@ -239,6 +252,9 @@ async function pollPrices(){
   if(by.BN.length)jobs.push(jget('/api/v3/ticker/price?symbols='+encodeURIComponent(JSON.stringify(by.BN.map(idOf))))
     .catch(()=>jget('/api/v3/ticker/price'))
     .then(j=>{j.forEach(x=>setPx('BN:'+x.symbol,+x.price));market.src.BN.at=Date.now();market.src.BN.ok=true;market.src.BN.err=null;}).catch(e=>fail('BN',e)));
+  if(by.AL.length&&alOn()&&Date.now()-(market.alPxAt||0)>(by.AL.some(k=>need.has(k))?5000:20000)){market.alPxAt=Date.now();
+    jobs.push(alData('/v2/stocks/trades/latest?feed=iex&symbols='+by.AL.map(idOf).join(',')).then(j=>{const t=(j&&j.trades)||{};for(const s in t)if(+t[s].p>0)setPx('AL:'+s,+t[s].p);
+      market.src.AL.at=Date.now();market.src.AL.ok=true;market.src.AL.err=null;}).catch(e=>fail('AL',e)));}
   if(by.BF.length)jobs.push(fget(FAPI+'/fapi/v1/ticker/price')
     .then(j=>{const w=new Set(by.BF);j.forEach(x=>{const k='BF:'+x.symbol;if(w.has(k))setPx(k,+x.price);});market.src.BF.at=Date.now();market.src.BF.ok=true;market.src.BF.err=null;}).catch(e=>fail('BF',e)));
   if(by.HL.length){
@@ -325,7 +341,7 @@ async function fetchKlines(tf){
   };
   /* sin historial previo: se piden varios días para reunir velas de sesión real; después, solo las nuevas */
   const since=k=>{const r=market.raw[tf+'|'+k];return r&&r.c.length&&now-r.c[r.c.length-1].t<(tf==='4h'?40:tf==='1h'?10:tf==='15m'?6:3)*864e5?r.c[r.c.length-1].t:null;};
-  const bin=keys.filter(k=>srcOf(k)!=='HL'),hls=keys.filter(k=>srcOf(k)==='HL');
+  const bin=keys.filter(k=>srcOf(k)!=='HL'&&srcOf(k)!=='AL'),hls=keys.filter(k=>srcOf(k)==='HL'),als=keys.filter(k=>srcOf(k)==='AL'&&alOn());
   await Promise.all([
     pool(bin,3,async k=>{if(cooling(srcOf(k)))return;const id=idOf(k);let r;try{
       if(srcOf(k)==='BN')r=await jget(`/api/v3/klines?symbol=${id}&interval=${tf}&limit=500`);
@@ -335,7 +351,10 @@ async function fetchKlines(tf){
       store(k,toK(r));}),
     pool(hls,2,async k=>{if(cooling('HL'))return;const st=since(k)||now-({'1m':1,'5m':4,'15m':11,'1h':42,'4h':170}[tf]||4)*864e5;
       let r;try{r=await hl({type:'candleSnapshot',req:{coin:idOf(k),interval:tf,startTime:st,endTime:now}});}catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail('HL',e);throw e;}
-      store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); })
+      store(k,r.map(c=>({t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v,ct:c.T}))); }),
+    pool(als,2,async k=>{if(cooling('AL')||!AL_TF[tf])return;const st=since(k)||now-({'1m':2,'5m':6,'15m':14,'1h':50,'4h':200}[tf]||6)*864e5;
+      let r;try{r=await alData(`/v2/stocks/${idOf(k)}/bars?timeframe=${AL_TF[tf]}&feed=iex&adjustment=raw&limit=10000&start=${new Date(st).toISOString()}`);}catch(e){if(/HTTP 4(18|29)/.test((e&&e.message)||''))fail('AL',e);throw e;}
+      store(k,((r&&r.bars)||[]).map(b=>{const t=Date.parse(b.t);return {t,o:+b.o,h:+b.h,l:+b.l,c:+b.c,v:+b.v,ct:t+ms-1};})); })
   ]);
 }
 const TF_MS={'1m':6e4,'5m':3e5,'15m':9e5,'1h':36e5,'4h':144e5};

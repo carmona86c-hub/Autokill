@@ -306,6 +306,13 @@ setInterval(async () => {
 const AL = (() => { const id = process.env.ALPACA_KEY_ID || '', sec = process.env.ALPACA_SECRET || '';
   if (!id || !sec || process.env.ALPACA_PAPER === 'no') return null;
   return { base: 'https://paper-api.alpaca.markets', h: { 'APCA-API-KEY-ID': id, 'APCA-API-SECRET-KEY': sec, 'Content-Type': 'application/json' }, acct: null, err: null, sent: 0, fails: 0, last: [] }; })();
+/* datos de mercado de Alpaca para el bot (ETF inversos): solo lectura de precios, con las claves del servidor */
+sandbox.alData = async p => {
+  if (!AL) throw new Error('sin claves de Alpaca');
+  const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 15000);
+  try { const r = await fetch('https://data.alpaca.markets' + p, { headers: AL.h, signal: ac.signal }); const t = await r.text();
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' Alpaca datos ' + t.slice(0, 120)); return JSON.parse(t); } finally { clearTimeout(tm); }
+};
 async function alCall(method, path, body) {
   const r = await fetch(AL.base + path, { method, headers: AL.h, body: body ? JSON.stringify(body) : undefined });
   const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) { }
@@ -356,13 +363,15 @@ async function alVerify() {
       const ch = syms.slice(i, i + 50), r = await fetch('https://data.alpaca.markets/v2/stocks/snapshots?feed=iex&symbols=' + ch.join(','), { headers: AL.h });
       if (!r.ok) throw new Error('datos de Alpaca ' + r.status); Object.assign(snap, await r.json());
     }
-    const m = {};
+    const m = {}, usOpen = run(`sessOpen('us',Date.now())`), prev = run(`(S.alpacaOK&&S.alpacaOK.m)||{}`);
     for (const [k, sym, hp] of pairs) {
       if (m[sym]) continue;
       let a = null; try { a = await alCall('GET', '/v2/assets/' + encodeURIComponent(sym)); } catch (e) { }
       const sn = snap[sym] || {}, ap = +((sn.latestTrade && sn.latestTrade.p) || (sn.dailyBar && sn.dailyBar.c) || (sn.prevDailyBar && sn.prevDailyBar.c) || 0);
       const dif = hp > 0 && ap > 0 ? Math.abs(hp / ap - 1) : null;
       const why = !a ? 'no existe en Alpaca' : !a.tradable || a.status !== 'active' ? 'no se puede operar en Alpaca' : !ap ? 'sin precio en Alpaca' : dif > .03 ? `es otro valor (Hyperliquid ${hp.toPrecision(5)} frente a Alpaca ${ap.toPrecision(5)})` : '';
+      /* con la bolsa cerrada el último precio de Alpaca es el del cierre y Hyperliquid sigue cotizando: la comparación de precio no vale, se mantiene lo que se vio en sesión */
+      if (!usOpen && /otro valor|sin precio/.test(why)) { m[sym] = prev[sym] || { ok: true, frac: !!(a && a.fractionable), px: ap, why: '' }; continue; }
       m[sym] = { ok: !why, frac: !!(a && a.fractionable), px: ap, why };
     }
     run(`(()=>{const nv=${JSON.stringify({ at: Date.now(), m: m })},old=S.alpacaOK&&S.alpacaOK.m||{};S.alpacaOK=nv;market.uniAt=0;

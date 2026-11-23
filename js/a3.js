@@ -556,7 +556,7 @@ function sigRecord(a,an,P,why){
   const id=an.sym+'|'+an.tf+'|'+an.side+'|'+c[c.length-1].t;if(G.open.some(x=>x.id===id))return;
   const sd=P.stopATR*an.atr;if(!(sd>0))return;
   G.open.push({id,v:2,k:an.sym,tf:an.tf,sh:an.side==='short'?1:0,t:Date.now(),e:an.price,sd,a:an.atr,cf:costOf(an.sym),tp:P.tpATR*an.atr,cR:costOf(an.sym)*an.price/sd,
-    h:Math.min(P.maxHold||48,48),dec:why?rlab(why):'apta: entra',f:(f=>SIG_FK.map(x=>f[x]??null))(sigFeat(a,an,P))});
+    h:Math.min(P.maxHold||48,48),rh:!an.side||an.side==='long'?(an.rsi>(a.params.rsiMax||70)?1:0):0,dec:why?rlab(why):'apta: entra',f:(f=>SIG_FK.map(x=>f[x]??null))(sigFeat(a,an,P))});
   if(G.open.length>800){let drop=G.open.length-800;G.open=G.open.filter(x=>drop<=0||SIG_OK.has(x.dec)||(drop--,false));if(G.open.length>800)G.open.splice(0,G.open.length-800);}
 }
 /* sigue cada ficha con las velas de su marco: objetivo o stop (si en la misma vela se tocan los dos, cuenta el stop) */
@@ -573,13 +573,13 @@ function sigResolve(){
     let out=null;for(let i=i0;i<sr.k.length;i++){const x=posStep(p,sr.k[i],ef[i],es[i],P,cost);if(x){const rr=(sh?e-x.px:x.px-e)/e-cost,fr=p.half?(p.r1+rr)/2:rr;out={r:fr*e/s.sd,res:x.why};break;}}
     if(!out){if(Date.now()-s.t>7*864e5)continue;keep.push(s);continue;}
     const rpb=pbSim(s,sr,ef,es,i0,P,cost,atr);
-    G.list.unshift({v:2,id:s.id,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2),rp:rpb==null?null:+rpb.toFixed(3)});
+    G.list.unshift({v:2,id:s.id,t:s.t,k:s.k,dec:s.dec,f:s.f,r:+out.r.toFixed(3),res:out.res,mfe:+p.mfe.toFixed(2),mae:+p.mae.toFixed(2),rp:rpb==null?null:+rpb.toFixed(3),rh:s.rh||0});
   }
   G.open=keep;sigTrim(G);
 }
 /* las señales rechazadas por calidad (puntuación baja, sin recorrido…) son muchísimas y casi no sirven para juzgar:
    se guardan como mucho 400; las aptas, que son las que cuentan, hasta 1.500. Así no se pierden por falta de sitio. */
-const SIG_JUNK=400;
+const SIG_JUNK=1200; /* antes 400: con tantas señales al día solo recordaba un día; ahora unos 3, para no juzgar por un solo movimiento */
 function sigTrim(G){let junk=0;G.list=G.list.filter(x=>SIG_OK.has(x.dec)||++junk<=SIG_JUNK);if(G.list.length>SIG_MAX)G.list.length=SIG_MAX;}
 const mstat=v=>{const n=v.length;if(!n)return {n:0,m:0,t:0,w:0};const m=v.reduce((a,b)=>a+b,0)/n,sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/(n-1)):0;return {n,m,t:sd>0?m/(sd/Math.sqrt(n)):0,w:v.filter(x=>x>0).length/n};};
 /* análisis: para cada característica y cada valor, cuántas señales, cuántas ganaron, R medio y si la diferencia es clara (t) */
@@ -1315,3 +1315,36 @@ function pbJudge(){
   }catch(e){}
 }
 setInterval(pbJudge,30*60e3);
+
+/* =====================================================================================
+   RSI ALTO SEGÚN CADA MERCADO
+   El filtro «RSI sobrecomprado» acierta en cripto (lo rechazado habría perdido −0,8R de media), pero en los ETF inversos
+   en un día de caídas fuertes el RSI se queda arriba mientras siguen subiendo: lo rechazado por RSI habría ganado
+   +0,56R de media (87 % de aciertos, 30 casos). Ahora el laboratorio juzga el filtro por grupo (cripto, acciones,
+   ETF inversos) con las señales de compra con RSI alto de los últimos 14 días: si en un grupo hay 25 casos o más,
+   ganan con claridad (t ≥ 2,5) y además ganan en al menos 3 días distintos (2 de cada 3), en ese grupo el RSI alto
+   deja de bloquear; si dejan de ganar, vuelve a bloquear. Nota 23/11: el 20/11 los ETF inversos ganaban con RSI alto
+   y el 23/11 perdían (−0,38R): por eso no basta un día.
+   ===================================================================================== */
+const rsiGrp=k=>srcOf(k)==='AL'?'ETF inversos':catOf(k);
+function rsiJudge(){
+  try{
+    const now=Date.now(),R=(S.sig&&S.sig.list||[]).filter(x=>x.res&&Math.abs(x.r)<10&&now-x.t<14*864e5&&(x.rh||x.dec==='RSI sobrecomprado')),g={};
+    const dd={};R.forEach(x=>{const k=rsiGrp(x.k);(g[k]=g[k]||[]).push(x.r);const d=new Date(x.t).toISOString().slice(0,10),o=(dd[k]=dd[k]||{});(o[d]=o[d]||[]).push(x.r);});
+    /* un solo día de subidas o caídas mueve todas las señales a la vez: se pide que gane en al menos 3 días distintos y en 2 de cada 3 */
+    const days=k=>{const o=dd[k]||{},ms=Object.values(o).map(v=>v.reduce((a,b)=>a+b,0)/v.length);return {n:ms.length,pos:ms.filter(m=>m>0).length};};
+    const F=S.rsiFree||(S.rsiFree={});
+    for(const k of new Set([...Object.keys(g),...Object.keys(F)])){
+      const xs=g[k]||[],n=xs.length,m=n?xs.reduce((a,b)=>a+b,0)/n:0,sd=n>1?Math.sqrt(xs.reduce((a,b)=>a+(b-m)**2,0)/(n-1))||1:1,t=n>1?m/(sd/Math.sqrt(n)):0,was=!!(F[k]&&F[k].on);
+      const D=days(k),on=was?(n>=15&&t>=1&&D.pos>=D.n/2):(n>=25&&t>=2.5&&D.n>=3&&D.pos>=D.n*2/3);
+      F[k]={on,n,m:+m.toFixed(2),t:+t.toFixed(1),at:now};
+      if(on!==was)L(null,'evolve',on?`RSI alto en ${k}: deja de bloquear. En ${n} señales con RSI alto de los últimos 14 días habrían ganado ${m.toFixed(2).replace('.',',')}R de media (${Math.round(xs.filter(v=>v>0).length/n*100)} % de aciertos, t = ${t.toFixed(1)}).`
+        :`RSI alto en ${k}: vuelve a bloquear. Las señales con RSI alto ya no ganan con claridad (${n} casos, ${m.toFixed(2).replace('.',',')}R de media, t = ${t.toFixed(1)}).`);
+    }
+  }catch(e){}
+}
+setTimeout(rsiJudge,60e3);setInterval(rsiJudge,30*60e3);
+{const d9=decide;decide=function(a,an,P,T,pre){
+  const F=S.rsiFree&&S.rsiFree[rsiGrp(an.sym)];
+  if(F&&F.on&&an.side!=='short'&&an.rsi>P.rsiMax)return d9.call(this,a,an,Object.assign({},P,{rsiMax:101}),T,pre);
+  return d9.apply(this,arguments);};}
